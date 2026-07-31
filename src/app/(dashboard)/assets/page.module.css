@@ -1,0 +1,264 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-section);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--color-text-primary);
+}
+
+.actions {
+  display: flex;
+  gap: var(--spacing-card);
+}
+
+.primaryBtn {
+  background-color: var(--color-primary-action);
+  color: white;
+  padding: 8px 16px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.primaryBtn:hover {
+  background-color: #000;
+}
+
+.tableContainer {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th, .table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.table th {
+  background-color: #F9FAFB;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover {
+  background-color: #F9FAFB;
+}
+
+.statusBadge {
+  display: inline-block;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background-color: #F3F4F6;
+  border: 1px solid var(--color-border);
+}
+
+.actionBtn {
+  background: none;
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.actionBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-primary);
+}
+
+.emptyState {
+  padding: var(--spacing-section);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+/* Modal Styles */
+.modalOverlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-card);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modalHeader h3 {
+  margin: 0;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.modalContent {
+  padding: var(--spacing-section);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-card);
+}
+
+.photoPlaceholder {
+  width: 100%;
+  height: 300px;
+  background-color: #F3F4F6;
+  border: 1px dashed var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.inputGroup label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.input {
+  border: 1px solid var(--color-border);
+  padding: 8px;
+  font-size: 1rem;
+}
+
+.saveBtn {
+  background-color: var(--color-primary-action);
+  color: white;
+  padding: 10px;
+  font-weight: 600;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.saveBtn:hover {
+  background-color: #000;
+}
+.timelineContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 20px;
+  margin-top: 16px;
+}
+
+.timelineContainer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 2px;
+  background-color: var(--color-border);
+}
+
+.timelineNode {
+  position: relative;
+  padding: 16px 0 16px 24px;
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.timelineNode:last-child {
+  border-bottom: none;
+}
+
+.timelineDot {
+  position: absolute;
+  left: -20px;
+  top: 24px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: var(--color-bg);
+  border: 2px solid var(--color-primary-action);
+}
+
+.timelineHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.timelineTime {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.timelineTitle {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.timelineSubtitle {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.timelineRemarks {
+  background-color: #F9FAFB;
+  border-left: 3px solid var(--color-border);
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  margin-top: 8px;
+  color: var(--color-text-primary);
+}

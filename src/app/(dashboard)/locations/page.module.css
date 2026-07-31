@@ -1,0 +1,152 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-section);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--color-text-primary);
+}
+
+.tableContainer {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th, .table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.table th {
+  background-color: #F9FAFB;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover {
+  background-color: #F9FAFB;
+}
+
+.actionBtn {
+  background: none;
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.actionBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-primary);
+}
+
+.emptyState {
+  padding: var(--spacing-section);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+/* Modal Styles */
+.modalOverlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-card);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modalHeader h3 {
+  margin: 0;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.modalContent {
+  padding: var(--spacing-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-gap);
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inputGroup label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.input {
+  border: 1px solid var(--color-border);
+  padding: 8px;
+  font-size: 1rem;
+}
+
+.saveBtn {
+  background-color: var(--color-primary-action);
+  color: white;
+  padding: 10px;
+  font-weight: 600;
+  margin-top: 16px;
+}
+
+.saveBtn:hover {
+  background-color: #000;
+}

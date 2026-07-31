@@ -1,0 +1,105 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-section);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--color-text-primary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-card);
+}
+
+@media (max-width: 1024px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-gap);
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  padding-bottom: var(--spacing-gap);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.statRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+
+.statValue {
+  font-weight: 700;
+  font-size: 1.2rem;
+}
+
+.chartContainerLarge {
+  height: 400px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.chartContainerSmall {
+  height: 300px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.emptyState {
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: var(--spacing-section);
+}
+
+.filters {
+  display: flex;
+  gap: var(--spacing-card);
+  padding: var(--spacing-card);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  align-items: center;
+  margin-bottom: var(--spacing-section);
+}
+
+.filterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filterGroup label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.filterInput {
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  font-size: 0.9rem;
+  min-width: 150px;
+}
