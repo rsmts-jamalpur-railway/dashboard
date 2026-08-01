@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiBook, FiX, FiEdit2 } from 'react-icons/fi';
+import { FiBook, FiX, FiEdit2, FiMapPin, FiHash, FiClock } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface Location {
@@ -76,10 +76,26 @@ export default function LocationsPage() {
         <table className={classes.table}>
           <thead>
             <tr>
-              <th>Location ID</th>
-              <th>Max Capacity</th>
-              <th>Standard TAT (Hours)</th>
-              <th>Actions</th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiMapPin style={{ color: 'var(--color-primary-action)' }} /> Location ID <span className={classes.typeIndicator}>varchar</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiHash /> Max Capacity <span className={classes.typeIndicator}>int4</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiClock /> Standard TAT (Hours) <span className={classes.typeIndicator}>int4</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  Actions
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>

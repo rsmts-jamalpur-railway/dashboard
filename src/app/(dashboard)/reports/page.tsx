@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
-import { FiBook } from 'react-icons/fi';
+import { FiBook, FiClock, FiKey, FiMap, FiActivity, FiUser } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface Handler {
@@ -125,11 +125,31 @@ export default function ReportsPage() {
         <table className={classes.table}>
           <thead>
             <tr>
-              <th>Timestamp</th>
-              <th>Wagon No.</th>
-              <th>Transition</th>
-              <th>Status Update</th>
-              <th>Handled By</th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiClock style={{ color: 'var(--color-primary-action)' }} /> Timestamp <span className={classes.typeIndicator}>timestamp</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiKey /> Wagon No. <span className={classes.typeIndicator}>varchar</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiMap /> Transition <span className={classes.typeIndicator}>text</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiActivity /> Status Update <span className={classes.typeIndicator}>text</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiUser /> Handled By <span className={classes.typeIndicator}>uuid</span>
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>

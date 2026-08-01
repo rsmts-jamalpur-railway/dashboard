@@ -5,7 +5,7 @@ import api from '@/lib/api';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell
 } from 'recharts';
-import { FiClock, FiBook } from 'react-icons/fi';
+import { FiClock, FiBook, FiKey, FiActivity } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface Occupancy {
@@ -267,8 +267,16 @@ export default function DashboardPage() {
               <table className={classes.table}>
                 <thead>
                   <tr>
-                    <th>Wagon</th>
-                    <th>Action</th>
+                    <th>
+                      <div className={classes.tableHeaderCell}>
+                        <FiKey style={{ color: 'var(--color-primary-action)' }} /> Wagon <span className={classes.typeIndicator}>varchar</span>
+                      </div>
+                    </th>
+                    <th>
+                      <div className={classes.tableHeaderCell}>
+                        <FiActivity /> Action <span className={classes.typeIndicator}>text</span>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

@@ -9,11 +9,11 @@ import { FaTrainSubway } from 'react-icons/fa6';
 
 const menuItems = [
   { name: 'Dashboard', path: '/', icon: <FiHome /> },
-  { name: 'Analytics', path: '/analytics', icon: <FiTrendingUp /> },
-  { name: 'Movement Reports', path: '/reports', icon: <FiBarChart2 /> },
   { name: 'Assets Master', path: '/assets', icon: <FaTrainSubway /> },
-  { name: 'Users & Devices', path: '/users', icon: <FiUsers /> },
+  { name: 'Movement Reports', path: '/reports', icon: <FiBarChart2 /> },
+  { name: 'Analytics', path: '/analytics', icon: <FiTrendingUp /> },
   { name: 'Locations', path: '/locations', icon: <FiMapPin /> },
+  { name: 'Users & Devices', path: '/users', icon: <FiUsers /> },
   { name: 'Sync Monitor', path: '/sync', icon: <FiRadio /> },
   { name: 'Settings & Audit', path: '/settings', icon: <FiSettings /> },
 ];

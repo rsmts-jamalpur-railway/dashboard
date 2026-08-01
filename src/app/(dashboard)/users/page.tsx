@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiBook, FiX, FiEdit2 } from 'react-icons/fi';
+import { FiBook, FiX, FiEdit2, FiKey, FiType, FiUser, FiSmartphone } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface Role {
@@ -139,12 +139,36 @@ export default function UsersPage() {
         <table className={classes.table}>
           <thead>
             <tr>
-              <th>Employee ID</th>
-              <th>Full Name</th>
-              <th>Department</th>
-              <th>Role</th>
-              <th>Device Access</th>
-              <th>Actions</th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiKey style={{ color: 'var(--color-primary-action)' }} /> Employee ID <span className={classes.typeIndicator}>varchar</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiUser /> Full Name <span className={classes.typeIndicator}>text</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiType /> Department <span className={classes.typeIndicator}>text</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiType /> Role <span className={classes.typeIndicator}>uuid</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiSmartphone /> Device Access <span className={classes.typeIndicator}>bool</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  Actions
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>

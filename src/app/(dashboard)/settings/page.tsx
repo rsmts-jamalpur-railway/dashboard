@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiBook } from 'react-icons/fi';
+import { FiBook, FiClock, FiActivity, FiUser, FiFileText } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface Setting {
@@ -65,6 +65,15 @@ export default function SettingsPage() {
   }, []);
 
   const handleUpdateSetting = async (key: string, value: string) => {
+    if (key === 'ASSET_FORM_CONFIG') {
+      try {
+        JSON.parse(value);
+      } catch (e: any) {
+        toast.error('Invalid JSON Formatting', `Please check your syntax before saving: ${e.message}`);
+        return;
+      }
+    }
+
     try {
       await api.patch(`/settings/${key}`, { value });
       toast.success('Setting Updated', `${key} was successfully saved.`);
@@ -98,16 +107,29 @@ export default function SettingsPage() {
                   <span className={classes.settingName}>{setting.key.replace(/_/g, ' ')}</span>
                   <span className={classes.settingDesc}>{setting.description}</span>
                 </div>
-                <input
-                  type={setting.value === 'true' || setting.value === 'false' ? 'text' : 'number'}
-                  className={classes.input}
-                  value={setting.value}
-                  onChange={(e) => {
-                    const newVal = e.target.value;
-                    setSettings(settings.map(s => s.key === setting.key ? { ...s, value: newVal } : s));
-                  }}
-                  onBlur={(e) => handleUpdateSetting(setting.key, e.target.value)}
-                />
+                {setting.key === 'ASSET_FORM_CONFIG' ? (
+                  <textarea
+                    className={classes.input}
+                    style={{ height: '200px', fontFamily: 'monospace', resize: 'vertical' }}
+                    value={setting.value}
+                    onChange={(e) => {
+                      const newVal = e.target.value;
+                      setSettings(settings.map(s => s.key === setting.key ? { ...s, value: newVal } : s));
+                    }}
+                    onBlur={(e) => handleUpdateSetting(setting.key, e.target.value)}
+                  />
+                ) : (
+                  <input
+                    type={setting.value === 'true' || setting.value === 'false' ? 'text' : 'number'}
+                    className={classes.input}
+                    value={setting.value}
+                    onChange={(e) => {
+                      const newVal = e.target.value;
+                      setSettings(settings.map(s => s.key === setting.key ? { ...s, value: newVal } : s));
+                    }}
+                    onBlur={(e) => handleUpdateSetting(setting.key, e.target.value)}
+                  />
+                )}
               </div>
             ))
           )}
@@ -120,10 +142,26 @@ export default function SettingsPage() {
             <table className={classes.table}>
               <thead>
                 <tr>
-                  <th>Timestamp</th>
-                  <th>Action</th>
-                  <th>User</th>
-                  <th>Details</th>
+                  <th>
+                    <div className={classes.tableHeaderCell}>
+                      <FiClock style={{ color: 'var(--color-primary-action)' }} /> Timestamp <span className={classes.typeIndicator}>timestamp</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className={classes.tableHeaderCell}>
+                      <FiActivity /> Action <span className={classes.typeIndicator}>text</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className={classes.tableHeaderCell}>
+                      <FiUser /> User <span className={classes.typeIndicator}>uuid</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className={classes.tableHeaderCell}>
+                      <FiFileText /> Details <span className={classes.typeIndicator}>jsonb</span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>

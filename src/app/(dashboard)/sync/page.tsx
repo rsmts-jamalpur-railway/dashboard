@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiRefreshCw } from 'react-icons/fi';
+import { FiRefreshCw, FiSmartphone, FiUser, FiKey, FiClock, FiActivity } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface User {
@@ -77,12 +77,36 @@ export default function SyncMonitorPage() {
         <table className={classes.table}>
           <thead>
             <tr>
-              <th>Device ID</th>
-              <th>Assigned User</th>
-              <th>Employee ID</th>
-              <th>Last Synced</th>
-              <th>Health Status</th>
-              <th>Actions</th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiSmartphone style={{ color: 'var(--color-primary-action)' }} /> Device ID <span className={classes.typeIndicator}>uuid</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiUser /> Assigned User <span className={classes.typeIndicator}>text</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiKey /> Employee ID <span className={classes.typeIndicator}>varchar</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiClock /> Last Synced <span className={classes.typeIndicator}>timestamp</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiActivity /> Health Status <span className={classes.typeIndicator}>status</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  Actions
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>

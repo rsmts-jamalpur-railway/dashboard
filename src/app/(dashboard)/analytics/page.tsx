@@ -4,7 +4,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, ComposedChart, Line
 } from 'recharts';
-import { FiBook } from 'react-icons/fi';
+import { FiBook, FiDownload } from 'react-icons/fi';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
 import classes from './page.module.css';
@@ -35,7 +37,8 @@ export default function AnalyticsPage() {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [logs, setLogs] = useState<MovementLog[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [locationData, setLocationData] = useState<{name: string, value: number}[]>([]);
+  const [statusData, setStatusData] = useState<{name: string, value: number}[]>([]);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
 
@@ -48,16 +51,26 @@ export default function AnalyticsPage() {
           url += `?startDate=${startDate}&endDate=${endDate}`;
         }
         
-        const [movementsRes, assetsRes] = await Promise.all([
+        const [movementsRes, distributionRes] = await Promise.all([
           api.get(url),
-          api.get('/assets?limit=1000')
+          api.get('/reports/distribution')
         ]);
 
         if (movementsRes.data.success) {
           setLogs(movementsRes.data.data || []);
         }
-        if (assetsRes.data.success) {
-          setAssets(assetsRes.data.data || []);
+        if (distributionRes.data.success) {
+          const distData = distributionRes.data.data;
+          // Sort by highest value
+          const locs = (distData.locations || []).map((l: any) => ({
+            name: l.name || 'Transit',
+            value: l.value
+          })).sort((a: any, b: any) => b.value - a.value);
+
+          const stats = (distData.statuses || []).sort((a: any, b: any) => b.value - a.value);
+
+          setLocationData(locs);
+          setStatusData(stats);
         }
       } catch (err) {
         toast.error('Failed to fetch historical data', err);
@@ -72,6 +85,24 @@ export default function AnalyticsPage() {
   // --- DATA AGGREGATION FOR CHARTS ---
 
   // 1. Daily Arrivals vs Dispatches
+  const exportToPDF = async () => {
+    const input = document.getElementById('analytics-dashboard');
+    if (!input) return;
+    try {
+      const canvas = await html2canvas(input, { scale: 2 });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      pdf.text(`RSMTS Analytics Report (${startDate} to ${endDate})`, 14, 15);
+      pdf.addImage(imgData, 'PNG', 10, 20, pdfWidth - 20, pdfHeight - 20);
+      pdf.save(`analytics_report_${startDate}_to_${endDate}.pdf`);
+    } catch (err) {
+      toast.error('Export Failed', 'Could not generate PDF report.');
+    }
+  };
+
   const dailyData = useMemo(() => {
     const dailyMap: Record<string, { arrivals: number; dispatches: number }> = {};
     
@@ -89,21 +120,20 @@ export default function AnalyticsPage() {
         dailyMap[dateStr] = { arrivals: 0, dispatches: 0 };
       }
 
-      // Logic for "Arrived" vs "Dispatched"
-      // Arrived means new_status is Workshop In or it's the very first log.
-      if (log.new_status === 'Workshop In' && (log.to_location === 'NSY' || log.from_location === null)) {
+      // Arrived means it's an external intake
+      if (['NSY IN', 'GIF IN', 'CRANE IN'].includes(log.new_status)) {
         dailyMap[dateStr].arrivals += 1;
       }
-      // Dispatched means it went out
-      if (log.new_status === 'Workshop Out') {
+      // Dispatched means it left the workshop entirely
+      if (['NSY OUT', 'GIF OUT', 'CRANE OUT'].includes(log.new_status)) {
         dailyMap[dateStr].dispatches += 1;
       }
     });
 
     return Object.entries(dailyMap).map(([date, data]) => ({
       date,
-      'Workshop In': data.arrivals,
-      'Workshop Out': data.dispatches
+      'Arrivals': data.arrivals,
+      'Dispatches': data.dispatches
     })).sort((a, b) => a.date.localeCompare(b.date));
   }, [logs, startDate, endDate]);
 
@@ -124,33 +154,18 @@ export default function AnalyticsPage() {
   }, [logs]);
 
   // 3. Current Asset Location Distribution
-  const locationData = useMemo(() => {
-    const locMap: Record<string, number> = {};
-    assets.forEach(asset => {
-      const loc = asset.current_location || 'Transit';
-      locMap[loc] = (locMap[loc] || 0) + 1;
-    });
-    return Object.entries(locMap)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [assets]);
-
-  // 4. Current Status Breakdown
-  const statusData = useMemo(() => {
-    const statusMap: Record<string, number> = {};
-    assets.forEach(asset => {
-      statusMap[asset.current_status] = (statusMap[asset.current_status] || 0) + 1;
-    });
-    return Object.entries(statusMap)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [assets]);
-
+  // Location and Status Data are now fetched directly from DB Aggregation
 
   return (
     <div className={classes.container}>
-      <div className={classes.header}>
+      <div className={classes.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className={classes.title}>Strategic Analytics</h1>
+        <button 
+          onClick={exportToPDF} 
+          style={{ background: 'var(--color-primary-action)', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <FiDownload /> Export PDF Report
+        </button>
       </div>
 
       {/* Date Filters */}
@@ -178,7 +193,7 @@ export default function AnalyticsPage() {
       {loading ? (
         <div className={classes.emptyState}>Generating reports...</div>
       ) : (
-        <div className={classes.grid}>
+        <div id="analytics-dashboard" className={classes.grid} style={{ padding: '16px', backgroundColor: 'var(--color-bg)' }}>
           
           {/* Chart 1: Workshop In vs Workshop Out */}
           <div className={classes.card} style={{ gridColumn: 'span 2' }}>
@@ -193,8 +208,8 @@ export default function AnalyticsPage() {
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
                   />
                   <Legend />
-                  <Bar dataKey="Workshop In" barSize={30} fill="#8884d8" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="Workshop Out" stroke="#ff7300" strokeWidth={3} dot={{ r: 5 }} />
+                  <Bar dataKey="Arrivals" barSize={30} fill="#8884d8" radius={[4, 4, 0, 0]} />
+                  <Line type="monotone" dataKey="Dispatches" stroke="#ff7300" strokeWidth={3} dot={{ r: 5 }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -214,7 +229,7 @@ export default function AnalyticsPage() {
                     outerRadius={65}
                     paddingAngle={5}
                     dataKey="value"
-                    label={({ name, percent }: any) => `${name || 'Unknown'} ${((percent || 0) * 100).toFixed(0)}%`}
+                    label={({ name, value, percent }: any) => `${name || 'Unknown'}: ${value} (${((percent || 0) * 100).toFixed(0)}%)`}
                     labelLine={false}
                     fontSize={12}
                   >
@@ -265,7 +280,7 @@ export default function AnalyticsPage() {
                     cy="50%"
                     outerRadius={65}
                     dataKey="value"
-                    label={({ name }: any) => `${(name || '').replace(/_/g, ' ')}`}
+                    label={({ name, value, percent }: any) => `${(name || '').replace(/_/g, ' ')}: ${value} (${((percent || 0) * 100).toFixed(0)}%)`}
                     fontSize={12}
                   >
                     {statusData.map((entry, index) => (
@@ -286,13 +301,13 @@ export default function AnalyticsPage() {
       <div style={{ marginTop: '16px', padding: '8px 16px', backgroundColor: 'transparent', border: 'none', fontSize: '0.75rem', fontWeight: 300, color: 'var(--color-text-secondary)' }}>
         <h4 style={{ margin: '0 0 8px 0', color: 'var(--color-text-secondary)', fontWeight: 400 }}><FiBook style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Analytics Terminology Reference</h4>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px' }}>
-          <div>Workshop In/Out: Overall intake vs dispatch throughput</div>
-          <div>Top Movement Paths: Most frequent transitions between statuses</div>
+          <div>Arrivals / Dispatches: Overall intake (NSY IN) vs dispatch (NSY OUT) throughput</div>
+          <div>Top Movement Paths: Most frequent transitions between statuses (e.g. SHOP IN ➔ FIT)</div>
           <div>Location Distribution: Heatmap of where wagons are physically stuck</div>
           <div>Status Distribution: Overview of active wagon repair lifecycles</div>
           <div>NSY: New Sick Yard (Initial triage location)</div>
-          <div>WRS: Wagon Repair Shop (Active repair lines)</div>
-          <div>GIF: Goods Inspection Facility</div>
+          <div>SHOP IN / FIT: Wagon is actively being repaired or marked complete</div>
+          <div>GIF / CRANE: New manufacturing origins</div>
         </div>
       </div>
 
