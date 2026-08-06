@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiSearch, FiCamera, FiEdit2, FiX, FiBook, FiChevronLeft, FiChevronRight, FiKey, FiType, FiCalendar, FiClock, FiHash, FiDownload } from 'react-icons/fi';
+import { FiSearch, FiCamera, FiEdit2, FiX, FiBook, FiChevronLeft, FiChevronRight, FiKey, FiType, FiCalendar, FiClock, FiHash, FiDownload, FiAlertTriangle } from 'react-icons/fi';
 import Papa from 'papaparse';
 import classes from './page.module.css';
 
@@ -25,6 +25,8 @@ interface RepairCycle {
   nsy_in_date: string | null;
   nsy_out_date: string | null;
   tat_days: number | null;
+  estimated_tat_days: number | null;
+  extended_tat_reason: string | null;
   movement_logs: MovementLog[];
 }
 
@@ -74,6 +76,12 @@ export default function AssetsPage() {
   // Lightbox State
   const [lightboxImages, setLightboxImages] = useState<{ photo_url: string }[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Admin God Mode State
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [adminActionAsset, setAdminActionAsset] = useState<Asset | null>(null);
+  const [adminActionType, setAdminActionType] = useState<string>('');
+  const [adminTargetShop, setAdminTargetShop] = useState<string>('WRS-1');
   
   const [formData, setFormData] = useState({
     asset_number: '',
@@ -337,6 +345,31 @@ export default function AssetsPage() {
       </div>
 
       {error && <div style={{ color: 'var(--color-danger)' }}>{error}</div>}
+
+      {(() => {
+        const missingCount = assets.filter(a => a.current_status === 'Missing').length;
+        const condemnedCount = assets.filter(a => a.current_status === 'Condemned').length;
+        if (missingCount === 0 && condemnedCount === 0) return null;
+        return (
+          <div style={{ padding: '16px', backgroundColor: '#fee2e2', border: '1px solid #ef4444', borderRadius: '8px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ margin: '0 0 8px 0', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FiAlertTriangle /> Critical Exceptions Require Admin Attention
+              </h3>
+              <div style={{ color: '#7f1d1d', fontSize: '0.9rem' }}>
+                {missingCount > 0 && <span><strong>{missingCount}</strong> Wagons reported Missing. </span>}
+                {condemnedCount > 0 && <span><strong>{condemnedCount}</strong> Wagons flagged for Condemnation (Scrap).</span>}
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsAdminModalOpen(true)}
+              style={{ backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+            >
+              Resolve Exceptions
+            </button>
+          </div>
+        );
+      })()}
 
       <div className={classes.tableContainer}>
         <table className={classes.table}>
@@ -782,10 +815,22 @@ export default function AssetsPage() {
                           <div className={classes.timelineCycleHeader}>
                             <div className={classes.timelineCycleDot} />
                             <h4 style={{ margin: 0, color: 'var(--color-primary-action)' }}>Repair Visit #{cycle.cycle_number}</h4>
-                            {cycle.tat_days !== null && (
-                              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-secondary)', backgroundColor: '#E5E7EB', padding: '4px 12px', borderRadius: '12px' }}>
-                                TAT: {cycle.tat_days} Days
-                              </span>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              {cycle.tat_days !== null && (
+                                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-secondary)', backgroundColor: '#E5E7EB', padding: '4px 12px', borderRadius: '12px' }}>
+                                  Actual TAT: {cycle.tat_days} Days
+                                </span>
+                              )}
+                              {cycle.estimated_tat_days !== null && (
+                                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#92400e', backgroundColor: '#fef3c7', padding: '4px 12px', borderRadius: '12px' }}>
+                                  Est. TAT: {cycle.estimated_tat_days} Days
+                                </span>
+                              )}
+                            </div>
+                            {cycle.extended_tat_reason && (
+                              <div style={{ fontSize: '0.85rem', color: '#b91c1c', marginTop: '4px', fontStyle: 'italic' }}>
+                                Reason: "{cycle.extended_tat_reason}"
+                              </div>
                             )}
                           </div>
                           
@@ -881,6 +926,162 @@ export default function AssetsPage() {
 
             <div style={{ position: 'absolute', bottom: '24px', color: '#fff', fontSize: '16px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '16px' }}>
               {lightboxIndex + 1} / {lightboxImages.length}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin God Mode Modal */}
+      {isAdminModalOpen && (
+        <div className={classes.modalOverlay} onClick={() => setIsAdminModalOpen(false)}>
+          <div className={classes.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px' }}>
+            <div className={classes.modalHeader}>
+              <h3 style={{ color: '#ef4444' }}><FiAlertTriangle /> Resolve Critical Exceptions</h3>
+              <button className={classes.closeBtn} onClick={() => setIsAdminModalOpen(false)}><FiX /></button>
+            </div>
+            <div className={classes.modalContent}>
+              <p>The following assets require manual override by an Administrator.</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+                {assets.filter(a => ['Missing', 'Condemned', 'Hold'].includes(a.current_status)).map(asset => (
+                  <div key={asset.asset_number} style={{ border: '1px solid var(--color-border)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-bg)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <h4 style={{ margin: '0 0 4px 0' }}>{asset.asset_number}</h4>
+                        <span style={{ fontSize: '0.85rem', color: asset.current_status === 'Missing' ? '#ef4444' : '#f59e0b', fontWeight: 600, padding: '4px 8px', backgroundColor: asset.current_status === 'Missing' ? '#fee2e2' : '#fef3c7', borderRadius: '4px' }}>
+                          {asset.current_status}
+                        </span>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
+                          Last Known Location: {asset.allocated_shop || asset.current_location || 'Unknown'}
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {asset.current_status === 'Missing' && (
+                          <>
+                            <button 
+                              className={classes.primaryBtn} 
+                              onClick={() => { setAdminActionAsset(asset); setAdminActionType('Re-route'); }}
+                            >
+                              Force Re-Route
+                            </button>
+                            <button 
+                              style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                              onClick={() => { setAdminActionAsset(asset); setAdminActionType('Mark Found'); }}
+                            >
+                              Mark Found (Shop In)
+                            </button>
+                          </>
+                        )}
+                        {asset.current_status === 'Condemned' && (
+                          <button 
+                            style={{ backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                            onClick={() => { setAdminActionAsset(asset); setAdminActionType('Scrap'); }}
+                          >
+                            Approve Condemnation
+                          </button>
+                        )}
+                        {asset.current_status === 'Hold' && (
+                          <button 
+                            style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                            onClick={() => { setAdminActionAsset(asset); setAdminActionType('Release Hold'); }}
+                          >
+                            Release Hold
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action form drops down if selected */}
+                    {adminActionAsset?.asset_number === asset.asset_number && (
+                      <div style={{ marginTop: '16px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                        <h5 style={{ margin: '0 0 12px 0' }}>Action: {adminActionType}</h5>
+                        
+                        {adminActionType === 'Re-route' && (
+                          <div style={{ marginBottom: '16px' }}>
+                            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-text-secondary)' }}>Select Destination Shop</label>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              {['WRS-1', 'WRS-2', 'WRS-3', 'WRS-4', 'WRS-5'].map(shop => (
+                                <button 
+                                  key={shop}
+                                  onClick={() => setAdminTargetShop(shop)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    backgroundColor: adminTargetShop === shop ? '#0f172a' : '#fff',
+                                    color: adminTargetShop === shop ? '#fff' : '#0f172a',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {shop}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button 
+                            style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                            onClick={async () => {
+                              try {
+                                setSaving(true);
+                                let payload = {
+                                  asset_number: asset.asset_number,
+                                  new_status: '',
+                                  to_location: undefined as string | undefined,
+                                  remarks: ''
+                                };
+                                
+                                if (adminActionType === 'Re-route') {
+                                  payload.new_status = 'Allocated';
+                                  payload.to_location = adminTargetShop;
+                                  payload.remarks = 'Admin Force Re-Routed to ' + adminTargetShop;
+                                } else if (adminActionType === 'Mark Found') {
+                                  payload.new_status = 'Shop In';
+                                  payload.remarks = 'Admin Marked Found in Shop';
+                                } else if (adminActionType === 'Scrap') {
+                                  payload.new_status = 'Scrapped';
+                                  payload.to_location = 'Scrapped';
+                                  payload.remarks = 'Admin Approved Condemnation (Scrapped)';
+                                } else if (adminActionType === 'Release Hold') {
+                                  payload.new_status = 'Shop In';
+                                  payload.remarks = 'Admin Released Hold';
+                                }
+
+                                await api.post('/movement', payload);
+                                toast.success('Success', 'Admin action completed for ' + asset.asset_number);
+                                setAdminActionAsset(null);
+                                fetchAssets(page);
+                              } catch (err: any) {
+                                toast.error('Action Failed', err);
+                              } finally {
+                                setSaving(false);
+                              }
+                            }}
+                            disabled={saving}
+                          >
+                            {saving ? 'Processing...' : 'Confirm Action'}
+                          </button>
+                          <button 
+                            className={classes.actionBtn}
+                            onClick={() => setAdminActionAsset(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {assets.filter(a => ['Missing', 'Condemned', 'Hold'].includes(a.current_status)).length === 0 && (
+                  <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                    No critical exceptions found. System is healthy.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
