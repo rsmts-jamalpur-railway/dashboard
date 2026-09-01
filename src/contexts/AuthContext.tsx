@@ -7,6 +7,7 @@ import { User, AuthState } from '../types/user';
 interface AuthContextType extends AuthState {
   login: (token: string, user: User) => void;
   logout: () => void;
+  can: (permission: string) => boolean;
 }
 
 export const AuthContext = createContext<AuthContextType>({
@@ -15,6 +16,7 @@ export const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   login: () => {},
   logout: () => {},
+  can: () => false,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -69,6 +71,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [pathname, router, logout]);
 
+  const can = useCallback((permission: string) => {
+    return state.user?.permissions?.includes(permission) ?? false;
+  }, [state.user]);
+
   // Prevent rendering protected routes while checking token
   if (state.isLoading && pathname !== '/login') {
     return (
@@ -79,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout, can }}>
       {children}
     </AuthContext.Provider>
   );

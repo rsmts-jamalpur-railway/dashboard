@@ -1,9 +1,10 @@
 'use client';
-import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useState, useRef, useCallback, Fragment, useContext } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiSearch, FiCamera, FiEdit2, FiX, FiBook, FiChevronLeft, FiChevronRight, FiKey, FiType, FiCalendar, FiClock, FiHash, FiDownload, FiAlertTriangle } from 'react-icons/fi';
+import { AuthContext } from '@/contexts/AuthContext';
+import { FiSearch, FiCamera, FiEdit2, FiX, FiBook, FiChevronLeft, FiChevronRight, FiKey, FiType, FiCalendar, FiClock, FiHash, FiDownload, FiAlertTriangle, FiTrash2 } from 'react-icons/fi';
 import Papa from 'papaparse';
 import classes from './page.module.css';
 
@@ -48,14 +49,22 @@ interface Asset {
   origin?: string;
   allocated_shop?: string | null;
   custom_fields?: any;
-  is_active?: boolean;
+  asset_category: string;
+  loco_type?: string;
+  crane_age_tag?: string;
+  tc_variant?: string;
+  tc_zone?: string;
+  is_active: boolean;
   repair_cycles?: RepairCycle[];
   movement_logs?: MovementLog[];
 }
 
 export default function AssetsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const search = searchParams.get('search') || '';
+  const { user } = useContext(AuthContext);
+  const isAdmin = (user?.role as any)?.role_name === 'Administrator' || user?.role === 'Administrator';
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,8 +76,12 @@ export default function AssetsPage() {
 
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [searchInput, setSearchInput] = useState(search);
+
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [timelineAsset, setTimelineAsset] = useState<Asset | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'true' | 'all' | 'false'>('true');
@@ -85,6 +98,7 @@ export default function AssetsPage() {
   
   const [formData, setFormData] = useState({
     asset_number: '',
+    asset_category: 'WAGON',
     asset_type: 'BOXNHL',
     origin: 'REPAIR',
     wagon_sr: '',
@@ -95,6 +109,7 @@ export default function AssetsPage() {
     custom_fields: {} as any
   });
   const [formConfig, setFormConfig] = useState<any>(null);
+  const [locations, setLocations] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
@@ -143,7 +158,23 @@ export default function AssetsPage() {
     setPage(1);
     setHasMore(true);
     fetchAssets(1);
-  }, [search, activeFilter]); // re-fetch / filter if search or activeFilter changes
+    
+    if (searchParams.get('modal') === 'new') {
+      setIsRegisterOpen(true);
+      router.replace('/assets');
+    } else if (searchParams.get('focus') === 'search') {
+      setTimeout(() => {
+        if (searchInputRef.current) {
+          searchInputRef.current.focus();
+        }
+      }, 100);
+      router.replace('/assets');
+    }
+  }, [search, activeFilter, searchParams, router]); // re-fetch / filter if search or activeFilter changes
+
+  const handleSearch = () => {
+    router.push(`/assets?search=${searchInput}`);
+  };
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -154,6 +185,11 @@ export default function AssetsPage() {
           if (configSetting && configSetting.value) {
             setFormConfig(JSON.parse(configSetting.value));
           }
+        }
+        
+        const locRes = await api.get('/locations');
+        if (locRes.data.success) {
+          setLocations(locRes.data.data.filter((l: any) => !l.is_parking_line));
         }
       } catch (err) {
         console.error('Failed to fetch ASSET_FORM_CONFIG', err);
@@ -194,6 +230,17 @@ export default function AssetsPage() {
     }
   };
 
+  const handleHardDelete = async (asset_number: string) => {
+    if (!confirm(`⚠️ WARNING: Are you sure you want to PERMANENTLY DELETE asset ${asset_number}? This action cannot be undone and will destroy all movement history.`)) return;
+    try {
+      await api.delete(`/assets/${asset_number}?hard=true`);
+      toast.success('Asset Permanently Deleted', `Wagon ${asset_number} was completely wiped from the database.`);
+      fetchAssets();
+    } catch (err) {
+      toast.error('Failed to Permanently Delete', err);
+    }
+  };
+
   const handleReactivate = async (asset_number: string) => {
     if (!confirm(`Are you sure you want to reactivate asset ${asset_number}?`)) return;
     try {
@@ -211,7 +258,7 @@ export default function AssetsPage() {
       setSaving(true);
       await api.post('/assets', formData);
       setIsRegisterOpen(false);
-      setFormData({ asset_number: '', asset_type: formConfig ? formConfig.origins['REPAIR']?.assetTypes[0] || 'BOXNHL' : 'BOXNHL', origin: 'REPAIR', wagon_sr: '', rly: '', mod: '', built_year: new Date().getFullYear(), action: 'POH', custom_fields: {} });
+      setFormData({ asset_number: '', asset_category: 'WAGON', asset_type: formConfig ? formConfig.wagonTypes[0] : 'BOXNHL', origin: 'REPAIR', wagon_sr: '', rly: '', mod: '', built_year: new Date().getFullYear(), action: 'POH', custom_fields: {} });
       toast.success('Asset Registered', `Wagon ${formData.asset_number} has been added.`);
       fetchAssets();
     } catch (err: any) {
@@ -226,7 +273,16 @@ export default function AssetsPage() {
     if (!editingAsset) return;
     try {
       setSaving(true);
-      await api.patch(`/assets/${editingAsset.asset_number}`, { asset_type: editingAsset.asset_type });
+      await api.patch(`/assets/${editingAsset.asset_number}`, { 
+        asset_type: editingAsset.asset_type,
+        current_status: editingAsset.current_status,
+        current_location: editingAsset.current_location,
+        wagon_sr: editingAsset.wagon_sr,
+        rly: editingAsset.rly,
+        mod: editingAsset.mod,
+        built_year: editingAsset.built_year,
+        action: editingAsset.action
+      });
       setIsEditOpen(false);
       setEditingAsset(null);
       toast.success('Asset Updated', `Wagon ${editingAsset.asset_number} has been updated.`);
@@ -344,6 +400,22 @@ export default function AssetsPage() {
         </div>
       </div>
 
+      <div className={classes.searchBar}>
+        <FiSearch className={classes.searchIcon} />
+        <input 
+          type="text" 
+          ref={searchInputRef}
+          placeholder="Search by 11-digit Wagon Number..." 
+          className={classes.searchInput}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSearch();
+          }}
+        />
+        {searchInput && <button onClick={() => {setSearchInput(''); router.push('/assets');}} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}><FiX /></button>}
+      </div>
+
       {error && <div style={{ color: 'var(--color-danger)' }}>{error}</div>}
 
       {(() => {
@@ -378,17 +450,22 @@ export default function AssetsPage() {
 
               <th>
                 <div className={classes.tableHeaderCell}>
-                  <FiClock /> NSY IN <span className={classes.typeIndicator}>timestamp</span>
+                  <FiClock style={{ color: 'var(--color-primary-action)' }} /> NSY In <span className={classes.typeIndicator}>timestamp</span>
                 </div>
               </th>
               <th>
                 <div className={classes.tableHeaderCell}>
-                  <FiType /> Wagon Sr. <span className={classes.typeIndicator}>text</span>
+                  <FiType /> RS Sr <span className={classes.typeIndicator}>text</span>
                 </div>
               </th>
               <th>
                 <div className={classes.tableHeaderCell}>
-                  <FiKey style={{ color: 'var(--color-primary-action)' }} /> Wagon No. <span className={classes.typeIndicator}>varchar</span>
+                  <FiHash style={{ color: 'var(--color-primary-action)' }} /> RS No <span className={classes.typeIndicator}>text</span>
+                </div>
+              </th>
+              <th>
+                <div className={classes.tableHeaderCell}>
+                  <FiBook style={{ color: 'var(--color-primary-action)' }} /> Category <span className={classes.typeIndicator}>text</span>
                 </div>
               </th>
               <th>
@@ -483,6 +560,14 @@ export default function AssetsPage() {
                     <strong>{asset.asset_number}</strong>
                     {asset.is_active === false && <span style={{ marginLeft: '8px', fontSize: '0.7rem', color: '#ef4444', textDecoration: 'none' }}>(Inactive)</span>}
                   </td>
+                  <td>
+                    <span style={{ fontWeight: 600 }}>{asset.asset_category}</span>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                      {asset.loco_type && <span>{asset.loco_type}</span>}
+                      {asset.crane_age_tag && <span>{asset.crane_age_tag}</span>}
+                      {asset.tc_variant && <span>{asset.tc_variant} ({asset.tc_zone})</span>}
+                    </div>
+                  </td>
                   <td>{asset.rly || '-'}</td>
                   <td>{asset.asset_type}</td>
                   <td>{asset.mod || '-'}</td>
@@ -529,6 +614,16 @@ export default function AssetsPage() {
                           onClick={() => handleReactivate(asset.asset_number)}
                         >
                           Reactivate
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button 
+                          className={classes.actionBtn}
+                          style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                          onClick={() => handleHardDelete(asset.asset_number)}
+                          title="Permanently Delete (God Mode)"
+                        >
+                          <FiTrash2 />
                         </button>
                       )}
                     </div>
@@ -593,7 +688,7 @@ export default function AssetsPage() {
             <form className={classes.modalContent} onSubmit={handleRegister}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className={classes.inputGroup}>
-                  <label>Wagon Number (11-digit)</label>
+                  <label>RS Number</label>
                   <input 
                     type="text"
                     required
@@ -605,20 +700,33 @@ export default function AssetsPage() {
                 </div>
                 <div className={classes.inputGroup}>
                   <label>Origin</label>
+                  <input 
+                    type="text" 
+                    className={classes.input} 
+                    value={formData.origin} 
+                    onChange={(e) => setFormData({...formData, origin: e.target.value})} 
+                  />
+                </div>
+                <div className={classes.inputGroup}>
+                  <label>Asset Category</label>
                   <select 
                     className={classes.input}
-                    value={formData.origin}
+                    value={formData.asset_category}
                     onChange={(e) => {
-                      const newOrigin = e.target.value;
-                      const newAssetType = formConfig ? formConfig.origins[newOrigin]?.assetTypes[0] || '' : 'BOXNHL';
-                      setFormData({...formData, origin: newOrigin, asset_type: newAssetType});
+                      const newCategory = e.target.value;
+                      let newType = 'BOXNHL';
+                      if (formConfig) {
+                        if (newCategory === 'WAGON') newType = formConfig.wagonTypes[0];
+                        if (newCategory === 'LOCO') newType = formConfig.locoTypes[0];
+                        if (newCategory === 'CRANE') newType = formConfig.craneTypes[0];
+                      }
+                      setFormData({...formData, asset_category: newCategory, asset_type: newType});
                     }}
                   >
-                    {formConfig ? Object.keys(formConfig.origins).map(key => (
-                      <option key={key} value={key}>{formConfig.origins[key].label}</option>
-                    )) : (
-                      <option value="REPAIR">Repair (NSY)</option>
-                    )}
+                    <option value="WAGON">WAGON</option>
+                    <option value="LOCO">LOCOMOTIVE</option>
+                    <option value="CRANE">CRANE</option>
+                    <option value="TOWER_CAR">TOWER CAR</option>
                   </select>
                 </div>
                 <div className={classes.inputGroup}>
@@ -628,10 +736,11 @@ export default function AssetsPage() {
                     value={formData.asset_type}
                     onChange={(e) => setFormData({...formData, asset_type: e.target.value})}
                   >
-                    {formConfig && formConfig.origins[formData.origin]?.assetTypes ? (
-                      formConfig.origins[formData.origin].assetTypes.map((type: string) => (
-                        <option key={type} value={type}>{type}</option>
-                      ))
+                    {formConfig ? (
+                      formData.asset_category === 'WAGON' ? formConfig.wagonTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
+                      formData.asset_category === 'LOCO' ? formConfig.locoTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
+                      formData.asset_category === 'CRANE' ? formConfig.craneTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
+                      <option value="DETC">DETC</option>
                     ) : (
                       <option value="BOXNHL">BOXNHL</option>
                     )}
@@ -660,10 +769,10 @@ export default function AssetsPage() {
                     value={formData.action} 
                     onChange={(e) => setFormData({...formData, action: e.target.value})}
                   >
-                    {formConfig ? formConfig.actions.map((act: any) => (
-                      <option key={act.value} value={act.value}>{act.label}</option>
+                    {formConfig ? formConfig.actions.map((act: string) => (
+                      <option key={act} value={act}>{act}</option>
                     )) : (
-                      <option value="POH">POH (Periodic Overhaul)</option>
+                      <option value="POH">POH</option>
                     )}
                   </select>
                 </div>
@@ -717,10 +826,11 @@ export default function AssetsPage() {
                     value={editingAsset.asset_type}
                     onChange={(e) => setEditingAsset({...editingAsset, asset_type: e.target.value})}
                   >
-                    {formConfig && formConfig.origins[editingAsset.origin || 'REPAIR']?.assetTypes ? (
-                      formConfig.origins[editingAsset.origin || 'REPAIR'].assetTypes.map((type: string) => (
-                        <option key={type} value={type}>{type}</option>
-                      ))
+                    {formConfig ? (
+                      editingAsset.asset_category === 'WAGON' ? formConfig.wagonTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
+                      editingAsset.asset_category === 'LOCO' ? formConfig.locoTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
+                      editingAsset.asset_category === 'CRANE' ? formConfig.craneTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
+                      <option value="DETC">DETC</option>
                     ) : (
                       <option value={editingAsset.asset_type}>{editingAsset.asset_type}</option>
                     )}
@@ -746,16 +856,31 @@ export default function AssetsPage() {
                   <label>Action</label>
                   <select 
                     className={classes.input} 
-                    value={editingAsset.action || 'POH'} 
+                    value={editingAsset.action} 
                     onChange={(e) => setEditingAsset({...editingAsset, action: e.target.value})}
                   >
-                    {formConfig ? formConfig.actions.map((act: any) => (
-                      <option key={act.value} value={act.value}>{act.label}</option>
+                    {formConfig ? formConfig.actions.map((act: string) => (
+                      <option key={act} value={act}>{act}</option>
                     )) : (
-                      <option value="POH">POH (Periodic Overhaul)</option>
+                      <option value="POH">POH</option>
                     )}
                   </select>
                 </div>
+                {isAdmin && (
+                  <>
+                    <div className={classes.inputGroup} style={{ gridColumn: 'span 2' }}>
+                      <h4 style={{ color: '#ef4444', marginBottom: '8px', borderBottom: '1px solid #fee2e2', paddingBottom: '4px' }}>🛡️ Admin God Mode (Force Overrides)</h4>
+                    </div>
+                    <div className={classes.inputGroup}>
+                      <label>Force Status Override</label>
+                      <input type="text" className={classes.input} value={editingAsset.current_status || ''} onChange={(e) => setEditingAsset({...editingAsset, current_status: e.target.value})} style={{ borderColor: '#ef4444' }} />
+                    </div>
+                    <div className={classes.inputGroup}>
+                      <label>Force Location Override</label>
+                      <input type="text" className={classes.input} value={editingAsset.current_location || ''} onChange={(e) => setEditingAsset({...editingAsset, current_location: e.target.value})} style={{ borderColor: '#ef4444' }} />
+                    </div>
+                  </>
+                )}
                 {formConfig && formConfig.customFields && formConfig.customFields.map((field: any) => {
                   const cf = editingAsset.custom_fields || {};
                   return (
@@ -1001,20 +1126,20 @@ export default function AssetsPage() {
                           <div style={{ marginBottom: '16px' }}>
                             <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-text-secondary)' }}>Select Destination Shop</label>
                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                              {['WRS-1', 'WRS-2', 'WRS-3', 'WRS-4', 'WRS-5'].map(shop => (
+                              {locations.map(loc => (
                                 <button 
-                                  key={shop}
-                                  onClick={() => setAdminTargetShop(shop)}
+                                  key={loc.location_id}
+                                  onClick={() => setAdminTargetShop(loc.location_id)}
                                   style={{
                                     padding: '8px 16px',
-                                    backgroundColor: adminTargetShop === shop ? '#0f172a' : '#fff',
-                                    color: adminTargetShop === shop ? '#fff' : '#0f172a',
+                                    backgroundColor: adminTargetShop === loc.location_id ? '#0f172a' : '#fff',
+                                    color: adminTargetShop === loc.location_id ? '#fff' : '#0f172a',
                                     border: '1px solid #cbd5e1',
                                     borderRadius: '4px',
                                     cursor: 'pointer'
                                   }}
                                 >
-                                  {shop}
+                                  {loc.location_id}
                                 </button>
                               ))}
                             </div>

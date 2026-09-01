@@ -1,8 +1,9 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
-import { FiBook, FiX, FiEdit2, FiKey, FiType, FiUser, FiSmartphone } from 'react-icons/fi';
+import { FiBook, FiX, FiEdit2, FiKey, FiType, FiUser, FiSmartphone, FiTrash2 } from 'react-icons/fi';
 import classes from './page.module.css';
 
 interface Role {
@@ -21,6 +22,9 @@ interface User {
 }
 
 export default function UsersPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,7 +73,13 @@ export default function UsersPage() {
   useEffect(() => {
     fetchUsers();
     fetchRoles();
-  }, []);
+
+    if (searchParams.get('modal') === 'new') {
+      setIsRegisterOpen(true);
+      // Clean up the URL
+      router.replace('/users');
+    }
+  }, [searchParams, router]);
 
   const toggleUserStatus = async (user: User) => {
     if (!confirm(`Are you sure you want to ${user.is_active ? 'revoke' : 'activate'} device access for ${user.full_name}?`)) return;
@@ -79,6 +89,17 @@ export default function UsersPage() {
       fetchUsers();
     } catch (err) {
       toast.error('Failed to update status', err);
+    }
+  };
+
+  const handleHardDelete = async (user: User) => {
+    if (!confirm(`⚠️ WARNING: Are you sure you want to PERMANENTLY DELETE user ${user.full_name}? This action cannot be undone.`)) return;
+    try {
+      await api.delete(`/users/${user.id}`);
+      toast.success('User Deleted', `${user.full_name} has been permanently removed.`);
+      fetchUsers();
+    } catch (err: any) {
+      toast.error('Failed to Delete User', err.response?.data?.message || err.message);
     }
   };
 
@@ -208,6 +229,14 @@ export default function UsersPage() {
                         onClick={() => toggleUserStatus(u)}
                       >
                         {u.is_active ? 'Revoke Device' : 'Activate Device'}
+                      </button>
+                      <button 
+                        className={classes.actionBtn}
+                        style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                        onClick={() => handleHardDelete(u)}
+                        title="Permanently Delete User"
+                      >
+                        <FiTrash2 />
                       </button>
                     </div>
                   </td>

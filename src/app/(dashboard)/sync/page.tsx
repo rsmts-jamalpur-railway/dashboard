@@ -151,6 +151,7 @@ export default function SyncMonitorPage() {
           </tbody>
         </table>
       </div>
+
     </div>
   );
 }

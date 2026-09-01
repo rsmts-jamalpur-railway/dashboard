@@ -14,7 +14,7 @@
   padding: var(--spacing-section);
   flex: 1;
   overflow-y: auto;
-  background-color: #F9FAFB; /* Slightly off-white to make white cards pop */
+  background-color: var(--color-bg); 
 }
 
 /* Base styles for Breadcrumbs */

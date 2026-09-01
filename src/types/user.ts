@@ -1,9 +1,9 @@
 export interface User {
-  id: string;
-  employee_id: string;
-  full_name: string;
-  department: string;
+  userId: string;
+  employeeId: string;
   role: string;
+  assignedLocationId?: string;
+  permissions: string[];
 }
 
 export interface AuthState {

@@ -1,17 +1,27 @@
 :root {
-  --color-bg: #FFFFFF;
-  --color-border: #E5E7EB;
-  --color-text-primary: #111827;
-  --color-text-secondary: #6B7280;
-  --color-success: #16A34A;
+  --color-bg: #F9FAFB;
+  --color-surface-light: #FFFFFF;
+  --color-surface-dark: #0F172A;
+  --color-border: #E2E8F0;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-success: #22C55E;
   --color-warning: #F59E0B;
-  --color-danger: #DC2626;
-  --color-primary-action: #111827; /* Dark button bg */
+  --color-danger: #EF4444;
+  --color-primary-action: #0F172A; 
 
   --spacing-section: 24px;
-  --spacing-card: 16px;
+  --spacing-card: 20px;
   --spacing-inner: 12px;
-  --spacing-gap: 8px;
+  --spacing-gap: 12px;
+
+  --border-radius-card: 8px;
+  --border-radius-input: 6px;
+  --border-radius-pill: 6px; /* Revert pills to slight rounding for Shadcn style */
+
+  --shadow-subtle: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 
   --font-family: 'Inter', sans-serif;
 }
@@ -25,6 +35,7 @@ html, body {
   font-family: var(--font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 13px; /* Smaller text for Shadcn aesthetic */
 }
 
 *, *::before, *::after {
@@ -35,28 +46,42 @@ html, body {
 a {
   color: inherit;
   text-decoration: none;
+  transition: color 0.15s ease;
 }
 
 /* Base Form Resets */
 button, input, select, textarea {
   font-family: inherit;
+  font-size: 13px; 
   color: inherit;
   background: none;
-  border: none;
+  border: 1px solid var(--color-border);
   outline: none;
+  border-radius: var(--border-radius-input);
+  padding: 8px 12px; 
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background-color: var(--color-surface-light);
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--color-text-primary);
+  box-shadow: 0 0 0 1px var(--color-text-primary);
 }
 
 option {
-  background-color: var(--color-bg);
+  background-color: var(--color-surface-light);
   color: var(--color-text-primary);
 }
 
 button {
   cursor: pointer;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-light);
+  transition: background-color 0.15s ease;
+  box-shadow: var(--shadow-subtle);
 }
 
-/* Utility to ensure strictly no shadows or animations anywhere */
-* {
-  box-shadow: none !important;
-  transition: none !important;
+button:hover {
+  background-color: #F1F5F9; 
 }
+

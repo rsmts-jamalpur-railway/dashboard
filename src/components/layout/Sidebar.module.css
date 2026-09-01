@@ -1,13 +1,14 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  background-color: var(--color-bg);
+  background-color: var(--color-surface-light);
   border-right: 1px solid var(--color-border);
   height: 100vh;
   position: sticky;
   top: 0;
   overflow-y: auto;
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .sidebar.open {
@@ -15,14 +16,14 @@
 }
 
 .sidebar.closed {
-  width: 60px;
+  width: 80px;
 }
 
 .logoContainer {
-  height: 60px;
+  height: 64px;
   display: flex;
   align-items: center;
-  padding: 0 var(--spacing-card);
+  padding: 0 var(--spacing-section);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -39,38 +40,45 @@
 .nav {
   display: flex;
   flex-direction: column;
-  padding: var(--spacing-inner) 0;
+  padding: var(--spacing-section) var(--spacing-inner);
+  gap: 8px;
 }
 
 .link {
   display: flex;
   align-items: center;
-  padding: var(--spacing-inner) var(--spacing-card);
+  padding: 8px 12px;
+  margin: 0 12px;
   color: var(--color-text-secondary);
-  font-size: 0.9rem;
+  font-size: 13px;
   font-weight: 500;
-  border-left: 3px solid transparent;
+  border-radius: var(--border-radius-input);
+  transition: all 0.15s ease;
 }
 
 .link:hover {
-  background-color: #F9FAFB;
+  background-color: var(--color-bg);
   color: var(--color-text-primary);
 }
 
 .link.active {
   color: var(--color-text-primary);
-  border-left-color: var(--color-text-primary);
-  background-color: #F3F4F6;
+  background-color: var(--color-bg);
   font-weight: 600;
+}
+
+.link.active .icon {
+  color: var(--color-text-primary);
 }
 
 .icon {
   font-size: 1.2rem;
-  margin-right: var(--spacing-inner);
+  margin-right: 16px;
   display: flex;
   justify-content: center;
   align-items: center;
   width: 24px;
+  transition: color 0.3s ease;
 }
 
 .closed .icon {
@@ -79,4 +87,9 @@
 
 .name {
   white-space: nowrap;
+}
+
+.footer {
+  margin-top: auto;
+  padding: var(--spacing-section) var(--spacing-inner);
 }

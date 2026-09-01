@@ -1,0 +1,145 @@
+.container {
+  padding: var(--spacing-section);
+}
+
+.header {
+  margin-bottom: var(--spacing-section);
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+}
+
+.tableContainer {
+  background-color: var(--color-surface-light);
+  border-radius: var(--border-radius-card);
+  box-shadow: var(--shadow-subtle);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th, .table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.table th {
+  background-color: var(--color-surface-light);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background-color: #E5E7EB;
+  color: #374151;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.select {
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  width: 100%;
+  max-width: 250px;
+}
+
+.statusRed {
+  display: inline-block;
+  padding: 4px 12px;
+  background-color: #FEF2F2;
+  color: #DC2626;
+  border: 1px solid #F87171;
+  border-radius: 16px;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.statusPending {
+  display: inline-block;
+  padding: 4px 12px;
+  background-color: #FEF3C7;
+  color: #D97706;
+  border: 1px solid #FBBF24;
+  border-radius: 16px;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.btnGreen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background-color: #10B981;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btnGreen:hover:not(:disabled) {
+  background-color: #059669;
+}
+
+.btnGreen:disabled {
+  background-color: #6EE7B7;
+  cursor: not-allowed;
+}
+
+.btnRed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background-color: #EF4444;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btnRed:hover:not(:disabled) {
+  background-color: #DC2626;
+}
+
+.btnRed:disabled {
+  background-color: #FCA5A5;
+  cursor: not-allowed;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 32px;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}

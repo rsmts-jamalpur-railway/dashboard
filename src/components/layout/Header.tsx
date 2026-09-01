@@ -36,13 +36,20 @@ export default function Header({ toggleSidebar }: { toggleSidebar: () => void })
       </div>
       
       <div className={classes.right}>
-        <div className={classes.welcome}>
-          Welcome, <strong>{user?.full_name || 'Admin'}</strong>
-        </div>
         <button className={classes.iconBtn} title="Notifications">
           🔔
         </button>
-        <button className={classes.logoutBtn} onClick={logout} title="Logout">
+        
+        <div className={classes.userProfile} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginLeft: '16px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+            {user?.role ? user.role.replace('_', ' ') : 'Admin'}
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>
+            Location: {user?.assignedLocationId || 'Global'}
+          </div>
+        </div>
+
+        <button className={classes.logoutBtn} onClick={logout} title="Logout" style={{ marginLeft: '16px' }}>
           Logout
         </button>
       </div>

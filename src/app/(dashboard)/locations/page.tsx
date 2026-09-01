@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
 import { FiBook, FiX, FiEdit2, FiMapPin, FiHash, FiClock } from 'react-icons/fi';
@@ -12,12 +13,19 @@ interface Location {
 }
 
 export default function LocationsPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [editFormData, setEditFormData] = useState({ max_capacity: 0, standard_tat_hours: 0 });
+  
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addFormData, setAddFormData] = useState({ location_id: '', max_capacity: 0, standard_tat_hours: 0 });
+  
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
@@ -37,7 +45,12 @@ export default function LocationsPage() {
 
   useEffect(() => {
     fetchLocations();
-  }, []);
+
+    if (searchParams.get('modal') === 'new') {
+      setIsAddOpen(true);
+      router.replace('/locations');
+    }
+  }, [searchParams, router]);
 
   const handleEditClick = (loc: Location) => {
     setEditingLocation(loc);
@@ -64,10 +77,32 @@ export default function LocationsPage() {
     }
   };
 
+  const handleAddLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      await api.post('/locations', addFormData);
+      toast.success('Location Added', `${addFormData.location_id} has been added successfully.`);
+      setIsAddOpen(false);
+      setAddFormData({ location_id: '', max_capacity: 0, standard_tat_hours: 0 });
+      fetchLocations();
+    } catch (err: any) {
+      toast.error('Failed to add location', err.response?.data?.message || err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className={classes.container}>
       <div className={classes.header}>
         <h1 className={classes.title}>Workshop Locations</h1>
+        <button 
+          className={classes.primaryBtn} 
+          onClick={() => setIsAddOpen(true)}
+        >
+          Add Location
+        </button>
       </div>
 
       {error && <div style={{ color: 'var(--color-danger)' }}>{error}</div>}
@@ -172,6 +207,55 @@ export default function LocationsPage() {
               </div>
               <button type="submit" className={classes.saveBtn} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Location Modal */}
+      {isAddOpen && (
+        <div className={classes.modalOverlay} onClick={() => setIsAddOpen(false)}>
+          <div className={classes.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={classes.modalHeader}>
+              <h3>Add New Location</h3>
+              <button className={classes.closeBtn} onClick={() => setIsAddOpen(false)}><FiX /></button>
+            </div>
+            <form className={classes.modalContent} onSubmit={handleAddLocation}>
+              <div className={classes.inputGroup}>
+                <label>Location ID (e.g. WRS_6)</label>
+                <input 
+                  type="text"
+                  className={classes.input}
+                  value={addFormData.location_id}
+                  onChange={(e) => setAddFormData({...addFormData, location_id: e.target.value.toUpperCase()})}
+                  required
+                />
+              </div>
+              <div className={classes.inputGroup}>
+                <label>Max Capacity (Wagons)</label>
+                <input 
+                  type="number"
+                  min="0"
+                  className={classes.input}
+                  value={addFormData.max_capacity}
+                  onChange={(e) => setAddFormData({...addFormData, max_capacity: parseInt(e.target.value) || 0})}
+                  required
+                />
+              </div>
+              <div className={classes.inputGroup}>
+                <label>Standard Turnaround Time (Hours)</label>
+                <input 
+                  type="number"
+                  min="0"
+                  className={classes.input}
+                  value={addFormData.standard_tat_hours}
+                  onChange={(e) => setAddFormData({...addFormData, standard_tat_hours: parseInt(e.target.value) || 0})}
+                  required
+                />
+              </div>
+              <button type="submit" className={classes.saveBtn} disabled={saving}>
+                {saving ? 'Saving...' : 'Add Location'}
               </button>
             </form>
           </div>

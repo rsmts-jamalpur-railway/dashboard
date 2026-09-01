@@ -3,13 +3,12 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background-color: #F9FAFB;
+  background-color: #FFFFFF;
 }
 
 .loginBox {
-  background-color: var(--color-bg);
-  border: 1px solid var(--color-border);
-  padding: 40px;
+  background-color: #FFFFFF;
+  padding: 32px;
   width: 100%;
   max-width: 400px;
   display: flex;
@@ -17,90 +16,123 @@
 }
 
 .header {
-  text-align: center;
+  text-align: left;
   margin-bottom: 32px;
 }
 
 .header h1 {
-  margin: 0 0 8px 0;
-  font-size: 1.5rem;
-  color: var(--color-text-primary);
-}
-
-.header p {
   margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 0.9rem;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1A202C;
+  line-height: 1.2;
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-section);
+  gap: 20px;
 }
 
 .inputGroup {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  border: 1px solid #E2E8F0;
+  border-radius: 9999px;
+  padding: 0 16px;
+  height: 48px;
+  background-color: #FFFFFF;
 }
 
-.inputGroup label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
+.inputGroup:focus-within {
+  border-color: #38B2AC;
+  box-shadow: 0 0 0 1px #38B2AC;
 }
 
-.input {
-  border: 1px solid var(--color-border);
-  padding: 12px;
-  font-size: 1rem;
-}
-
-.input:focus {
-  border-color: var(--color-text-primary);
-}
-
-.passwordContainer {
-  display: flex;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-bg);
-}
-
-.passwordContainer:focus-within {
-  border-color: var(--color-text-primary);
-}
-
-.inputPassword {
-  flex: 1;
-  padding: 12px;
-  font-size: 1rem;
-  border: none;
-  outline: none;
-}
-
-.togglePassword {
-  padding: 0 12px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 1.1rem;
+.icon {
+  color: #A0AEC0;
+  margin-right: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.input, .inputPassword {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 14px;
+  color: #1A202C;
+  height: 100%;
+}
+
+.input::placeholder, .inputPassword::placeholder {
+  color: #A0AEC0;
+}
+
+.togglePassword {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #A0AEC0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.optionsRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.checkboxContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkboxContainer input {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: #38B2AC;
+  border: 1px solid #E2E8F0;
+  border-radius: 4px;
+}
+
+.checkboxLabel {
+  font-size: 13px;
+  color: #718096;
+}
+
+.forgotLink {
+  font-size: 13px;
+  color: #38B2AC;
+  text-decoration: none;
+  font-weight: 500;
+}
+
 .submitBtn {
-  background-color: var(--color-primary-action);
+  background-color: #38B2AC;
   color: white;
-  padding: 12px;
-  font-size: 1rem;
+  padding: 0 24px;
+  height: 48px;
+  font-size: 15px;
   font-weight: 600;
   margin-top: 8px;
+  border: none;
+  border-radius: 9999px;
+  transition: opacity 0.2s ease;
+  cursor: pointer;
 }
 
 .submitBtn:hover {
-  background-color: #000;
+  opacity: 0.9;
 }
 
 .submitBtn:disabled {
@@ -109,8 +141,7 @@
 }
 
 .error {
-  color: var(--color-danger);
+  color: #E53E3E;
   font-size: 0.85rem;
-  margin-bottom: -10px;
   text-align: center;
 }
