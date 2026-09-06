@@ -1,8 +1,17 @@
-export default function MfgPage() {
+'use client';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function ManufacturingPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace('/?pipeline=MANUFACTURING');
+  }, [router]);
+
   return (
-    <div style={{ padding: '24px', backgroundColor: '#fff', borderRadius: '8px', minHeight: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed #cbd5e1' }}>
-      <h2 style={{ color: '#0f172a', marginBottom: '8px' }}>Manufacturing Operations</h2>
-      <p style={{ color: '#64748b', fontStyle: 'italic' }}>Data unavailable (Read API Missing)</p>
+    <div style={{ padding: '32px', textAlign: 'center', color: '#64748B' }}>
+      <p style={{ fontSize: '14px', fontWeight: 600 }}>Switching to Manufacturing Lifecycle Command Center...</p>
     </div>
   );
 }

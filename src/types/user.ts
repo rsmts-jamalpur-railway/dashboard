@@ -2,8 +2,11 @@ export interface User {
   userId: string;
   employeeId: string;
   role: string;
+  name?: string;
+  email?: string;
   assignedLocationId?: string;
   permissions: string[];
+  roles?: string[];
 }
 
 export interface AuthState {
@@ -11,3 +14,4 @@ export interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 }
+

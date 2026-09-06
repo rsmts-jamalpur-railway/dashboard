@@ -1,8 +1,17 @@
+'use client';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
 export default function YardPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace('/?shop=NSY');
+  }, [router]);
+
   return (
-    <div style={{ padding: '24px', backgroundColor: '#fff', borderRadius: '8px', minHeight: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed #cbd5e1' }}>
-      <h2 style={{ color: '#0f172a', marginBottom: '8px' }}>Yard Operations</h2>
-      <p style={{ color: '#64748b', fontStyle: 'italic' }}>Data unavailable (Read API Missing)</p>
+    <div style={{ padding: '32px', textAlign: 'center', color: '#64748B' }}>
+      <p style={{ fontSize: '14px', fontWeight: 600 }}>Switching to North Store Yard (NSY) Command Center...</p>
     </div>
   );
 }

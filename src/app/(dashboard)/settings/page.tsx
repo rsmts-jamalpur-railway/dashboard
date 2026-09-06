@@ -120,7 +120,7 @@ export default function SettingsPage() {
                   />
                 ) : (
                   <input
-                    type={setting.value === 'true' || setting.value === 'false' ? 'text' : 'number'}
+                    type={!isNaN(Number(setting.value)) && setting.value.trim() !== '' && !setting.value.includes(',') ? 'number' : 'text'}
                     className={classes.input}
                     value={setting.value}
                     onChange={(e) => {

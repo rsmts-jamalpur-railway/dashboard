@@ -1,34 +1,49 @@
 'use client';
-import { useEffect, useState, useRef, useCallback, Fragment, useContext } from 'react';
+import { useEffect, useState, useRef, useCallback, useContext } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
 import { AuthContext } from '@/contexts/AuthContext';
-import { FiSearch, FiCamera, FiEdit2, FiX, FiBook, FiChevronLeft, FiChevronRight, FiKey, FiType, FiCalendar, FiClock, FiHash, FiDownload, FiAlertTriangle, FiTrash2 } from 'react-icons/fi';
+import { 
+  FiSearch, FiX, FiMapPin, FiClock, FiAlertTriangle, 
+  FiTruck, FiPause, FiPlay, FiAlertOctagon, FiActivity, 
+  FiEdit2, FiTrash2, FiDownload, FiPlus, FiGrid, FiList, 
+  FiCheckCircle, FiCheck, FiUser, FiArrowRight, FiBox, FiTool, FiCheckSquare
+} from 'react-icons/fi';
 import Papa from 'papaparse';
+import { decodeWagonNumber, detectAssetCategory, validateAssetNumber } from '@/lib/assetValidation';
+import AssetDetailModal from '@/components/dashboard/AssetDetailModal';
+import { YardIntakeModal, ManufacturingOrderModal, ReportExceptionModal } from '@/components/dashboard/QuickActionModals';
 import classes from './page.module.css';
 
-interface MovementLog {
-  log_id: string;
-  from_location: string | null;
+interface MovementRecord {
+  log_id?: string;
+  from_location?: string | null;
   to_location: string;
-  previous_status: string | null;
+  previous_status?: string | null;
   new_status: string;
   timestamp: string;
-  remarks: string | null;
-  handler: { full_name: string };
-  photos?: { photo_url: string }[];
+  remarks?: string | null;
+  handler?: { full_name?: string; employee?: any } | string;
 }
 
 interface RepairCycle {
   id: string;
-  cycle_number: number;
-  nsy_in_date: string | null;
-  nsy_out_date: string | null;
-  tat_days: number | null;
-  estimated_tat_days: number | null;
-  extended_tat_reason: string | null;
-  movement_logs: MovementLog[];
+  cycle_id?: string;
+  cycle_number?: number;
+  status: string;
+  started_at?: string;
+  repair_category?: {
+    id: string;
+    standard_tat_hours?: number;
+  };
+  holds?: Array<{
+    id: string;
+    reason: string;
+    remarks?: string | null;
+    started_at: string;
+    released_at: string | null;
+  }>;
 }
 
 interface Asset {
@@ -40,10 +55,6 @@ interface Asset {
   mod?: string;
   built_year?: number;
   action?: string;
-  nsy_in_date?: string;
-  shop_in_date?: string;
-  fit_date?: string;
-  nsy_out_date?: string;
   current_location: string | null;
   current_status: string;
   origin?: string;
@@ -56,1161 +67,1619 @@ interface Asset {
   tc_zone?: string;
   is_active: boolean;
   repair_cycles?: RepairCycle[];
-  movement_logs?: MovementLog[];
+  manufacturing_orders?: any[];
+  movements?: MovementRecord[];
+  movement_logs?: MovementRecord[];
+  exceptions?: any[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export default function AssetsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const search = searchParams.get('search') || '';
+  const initialSearch = searchParams.get('search') || '';
+  
   const { user } = useContext(AuthContext);
   const isAdmin = (user?.role as any)?.role_name === 'Administrator' || user?.role === 'Administrator';
+  const toast = useToast();
 
+  // Search & Filters State
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'true' | 'all' | 'false'>('true');
+  const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
+
+  // Asset Data State
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [error, setError] = useState('');
-  const [photoModalAsset, setPhotoModalAsset] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [locations, setLocations] = useState<any[]>([]);
 
+  // Selected Asset for Modals
+  const [selectedAssetNumber, setSelectedAssetNumber] = useState<string | null>(null);
+  const [detailModalAsset, setDetailModalAsset] = useState<string | null>(null);
+
+  // Quick Action Modals State (Yard Intake, Mfg Order, Global Exception)
+  const [isYardIntakeOpen, setIsYardIntakeOpen] = useState(false);
+  const [isMfgOrderOpen, setIsMfgOrderOpen] = useState(false);
+  const [isGlobalExceptionOpen, setIsGlobalExceptionOpen] = useState(false);
+
+  // Quick Shunt Modal State
+  const [showShuntModal, setShowShuntModal] = useState(false);
+  const [shuntAsset, setShuntAsset] = useState<Asset | null>(null);
+  const [targetLocation, setTargetLocation] = useState('WRS-1');
+  const [targetStatus, setTargetStatus] = useState('IN_REPAIR');
+  const [shuntRemarks, setShuntRemarks] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Quick Hold Modal State
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdAsset, setHoldAsset] = useState<Asset | null>(null);
+  const [holdReason, setHoldReason] = useState('MATERIAL_SHORTAGE');
+  const [holdRemarks, setHoldRemarks] = useState('');
+
+  // Quick Exception Modal State
+  const [showExceptionModal, setShowExceptionModal] = useState(false);
+  const [exceptionAsset, setExceptionAsset] = useState<Asset | null>(null);
+  const [exceptionType, setExceptionType] = useState('DEFECT_FOUND');
+  const [exceptionSeverity, setExceptionSeverity] = useState('HIGH');
+  const [exceptionReason, setExceptionReason] = useState('');
+
+  // Register / Edit Modal State
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
-  
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [searchInput, setSearchInput] = useState(search);
-
-  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
-  const [timelineAsset, setTimelineAsset] = useState<Asset | null>(null);
-  const [timelineLoading, setTimelineLoading] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<'true' | 'all' | 'false'>('true');
-
-  // Lightbox State
-  const [lightboxImages, setLightboxImages] = useState<{ photo_url: string }[] | null>(null);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-
-  // Admin God Mode State
-  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [adminActionAsset, setAdminActionAsset] = useState<Asset | null>(null);
-  const [adminActionType, setAdminActionType] = useState<string>('');
-  const [adminTargetShop, setAdminTargetShop] = useState<string>('WRS-1');
-  
   const [formData, setFormData] = useState({
     asset_number: '',
     asset_category: 'WAGON',
     asset_type: 'BOXNHL',
     origin: 'REPAIR',
     wagon_sr: '',
-    rly: '',
+    rly: 'ER',
     mod: '',
     built_year: new Date().getFullYear(),
     action: 'POH',
-    custom_fields: {} as any
+    current_location: 'NSY',
+    current_status: 'RECEIVED_NSY',
+    custom_fields: {} as any,
   });
-  const [formConfig, setFormConfig] = useState<any>(null);
-  const [locations, setLocations] = useState<any[]>([]);
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
 
-  const fetchAssets = async (pageNum = 1) => {
-    try {
-      if (pageNum === 1) setLoading(true);
-      else setLoadingMore(true);
-
-      const limit = 20;
-      let url = `/assets?page=${pageNum}&limit=${limit}&active=${activeFilter}`;
-      
-      const res = await api.get(url);
-      if (res.data.success) {
-        let fetchedAssets = res.data.data || [];
-        
-        // The backend filters are better, but we do client-side filter here if needed
-        if (search) {
-          fetchedAssets = fetchedAssets.filter((a: Asset) => 
-            a.asset_number.toLowerCase().includes(search.toLowerCase())
-          );
-        }
-
-        if (pageNum === 1) {
-          setAssets(fetchedAssets);
-        } else {
-          setAssets(prev => [...prev, ...fetchedAssets]);
-        }
-
-        const meta = res.data.meta;
-        if (meta) {
-          setHasMore(pageNum < meta.last_page);
-        } else {
-          setHasMore(fetchedAssets.length === limit);
-        }
-      }
-    } catch (err: any) {
-      setError('Failed to fetch assets.');
-      console.error(err);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  };
-
+  // Keep search input in sync if URL changes
   useEffect(() => {
-    setPage(1);
-    setHasMore(true);
-    fetchAssets(1);
-    
-    if (searchParams.get('modal') === 'new') {
-      setIsRegisterOpen(true);
-      router.replace('/assets');
-    } else if (searchParams.get('focus') === 'search') {
-      setTimeout(() => {
-        if (searchInputRef.current) {
-          searchInputRef.current.focus();
-        }
-      }, 100);
-      router.replace('/assets');
+    const s = searchParams.get('search') || '';
+    setSearchInput(s);
+    if (s) {
+      setViewMode('CARDS');
     }
-  }, [search, activeFilter, searchParams, router]); // re-fetch / filter if search or activeFilter changes
+  }, [searchParams]);
 
-  const handleSearch = () => {
-    router.push(`/assets?search=${searchInput}`);
-  };
-
+  // Load Locations Topology
   useEffect(() => {
-    const fetchConfig = async () => {
+    const fetchLocations = async () => {
       try {
-        const res = await api.get('/settings');
-        if (res.data.success) {
-          const configSetting = res.data.data.find((s: any) => s.key === 'ASSET_FORM_CONFIG');
-          if (configSetting && configSetting.value) {
-            setFormConfig(JSON.parse(configSetting.value));
-          }
-        }
-        
-        const locRes = await api.get('/locations');
-        if (locRes.data.success) {
-          setLocations(locRes.data.data.filter((l: any) => !l.is_parking_line));
+        const res = await api.get('/locations');
+        if (res.data?.success) {
+          setLocations(res.data.data || []);
         }
       } catch (err) {
-        console.error('Failed to fetch ASSET_FORM_CONFIG', err);
+        console.error('Failed to load locations', err);
       }
     };
-    fetchConfig();
+    fetchLocations();
   }, []);
 
-  // Infinite Scroll Observer
-  const observer = useRef<IntersectionObserver | null>(null);
-  const lastElementRef = useCallback((node: HTMLTableRowElement) => {
-    if (loading || loadingMore) return;
-    if (observer.current) observer.current.disconnect();
-    
-    observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore) {
-        setPage(prev => prev + 1);
+  // Fetch Assets from Backend with Full Server-Side Filtering
+  const fetchAssets = useCallback(async () => {
+    try {
+      setLoading(true);
+      const searchParam = searchParams.get('search') || '';
+
+      const queryParams = new URLSearchParams({
+        page: '1',
+        limit: '100',
+        active: activeFilter,
+      });
+
+      if (searchParam.trim()) {
+        queryParams.set('search', searchParam.trim());
       }
-    });
-    
-    if (node) observer.current.observe(node);
-  }, [loading, loadingMore, hasMore]);
+      if (selectedCategory !== 'ALL') {
+        queryParams.set('category', selectedCategory);
+      }
+      if (selectedStatus !== 'ALL') {
+        queryParams.set('status', selectedStatus);
+      }
+
+      const res = await api.get(`/assets?${queryParams.toString()}`);
+      if (res.data?.success) {
+        const data = res.data.data || [];
+        setAssets(data);
+        setTotalCount(res.data.meta?.total || data.length);
+      }
+    } catch (err: any) {
+      toast.error('Query Failed', err.response?.data?.message || 'Failed to fetch workshop assets');
+    } finally {
+      setLoading(false);
+    }
+  }, [searchParams, activeFilter, selectedCategory, selectedStatus, toast]);
 
   useEffect(() => {
-    if (page > 1) {
-      fetchAssets(page);
-    }
-  }, [page]);
+    fetchAssets();
+  }, [fetchAssets]);
 
-  const handleDelete = async (asset_number: string) => {
-    if (!confirm(`Are you sure you want to deactivate asset ${asset_number}?`)) return;
-    try {
-      await api.delete(`/assets/${asset_number}`);
-      toast.success('Asset Deactivated', `Wagon ${asset_number} was successfully removed.`);
-      fetchAssets();
-    } catch (err) {
-      toast.error('Failed to Deactivate', err);
+  // Execute Search
+  const handleExecuteSearch = (queryToSearch?: string) => {
+    const q = (queryToSearch !== undefined ? queryToSearch : searchInput).trim();
+    if (q) {
+      router.push(`/assets?search=${encodeURIComponent(q)}`);
+      setViewMode('CARDS');
+    } else {
+      router.push('/assets');
     }
   };
 
-  const handleHardDelete = async (asset_number: string) => {
-    if (!confirm(`⚠️ WARNING: Are you sure you want to PERMANENTLY DELETE asset ${asset_number}? This action cannot be undone and will destroy all movement history.`)) return;
-    try {
-      await api.delete(`/assets/${asset_number}?hard=true`);
-      toast.success('Asset Permanently Deleted', `Wagon ${asset_number} was completely wiped from the database.`);
-      fetchAssets();
-    } catch (err) {
-      toast.error('Failed to Permanently Delete', err);
-    }
+  const handleClearSearch = () => {
+    setSearchInput('');
+    router.push('/assets');
   };
 
-  const handleReactivate = async (asset_number: string) => {
-    if (!confirm(`Are you sure you want to reactivate asset ${asset_number}?`)) return;
-    try {
-      await api.patch(`/assets/${asset_number}`, { is_active: true });
-      toast.success('Asset Reactivated', `Wagon ${asset_number} is now active again.`);
-      fetchAssets();
-    } catch (err) {
-      toast.error('Failed to Reactivate', err);
-    }
+  // Quick Action Handlers
+  const handleOpenShunt = (asset: Asset) => {
+    setShuntAsset(asset);
+    setTargetLocation(asset.current_location || 'WRS-1');
+    setTargetStatus(asset.current_status || 'IN_REPAIR');
+    setShuntRemarks(`Shunted from ${asset.current_location || 'NSY'}`);
+    setShowShuntModal(true);
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleExecuteShunt = async () => {
+    if (!shuntAsset) return;
     try {
-      setSaving(true);
-      await api.post('/assets', formData);
-      setIsRegisterOpen(false);
-      setFormData({ asset_number: '', asset_category: 'WAGON', asset_type: formConfig ? formConfig.wagonTypes[0] : 'BOXNHL', origin: 'REPAIR', wagon_sr: '', rly: '', mod: '', built_year: new Date().getFullYear(), action: 'POH', custom_fields: {} });
-      toast.success('Asset Registered', `Wagon ${formData.asset_number} has been added.`);
+      setActionLoading(true);
+      await api.post('/movement', {
+        asset_number: shuntAsset.asset_number,
+        from_location: shuntAsset.current_location,
+        to_location: targetLocation,
+        new_status: targetStatus,
+        remarks: shuntRemarks || 'Direct Workshop Shunt Execution',
+      });
+      toast.success('Movement Logged', `Asset #${shuntAsset.asset_number} moved to ${targetLocation}`);
+      setShowShuntModal(false);
       fetchAssets();
     } catch (err: any) {
-      toast.error('Registration Failed', err);
+      toast.error('Move Failed', err.response?.data?.message || err.message);
     } finally {
-      setSaving(false);
+      setActionLoading(false);
     }
   };
 
-  const handleEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleToggleHold = async (asset: Asset) => {
+    const activeRepair = asset.repair_cycles?.find((c) => c.status === 'ACTIVE') || asset.repair_cycles?.[0];
+    const isCurrentlyHeld = asset.current_status === 'ON_HOLD' || (activeRepair?.holds && activeRepair.holds.some((h) => !h.released_at));
+
+    if (isCurrentlyHeld) {
+      // Direct Resume Overhaul
+      try {
+        setActionLoading(true);
+        await api.patch('/repair/resume', {
+          cycle_id: activeRepair?.cycle_id || activeRepair?.id,
+          asset_number: asset.asset_number,
+        });
+        toast.success('Hold Released', `Overhaul cycle resumed for #${asset.asset_number}`);
+        fetchAssets();
+      } catch (err: any) {
+        toast.error('Resume Failed', err.response?.data?.message || err.message);
+      } finally {
+        setActionLoading(false);
+      }
+    } else {
+      // Open Hold Reason Modal
+      setHoldAsset(asset);
+      setHoldReason('MATERIAL_SHORTAGE');
+      setHoldRemarks('');
+      setShowHoldModal(true);
+    }
+  };
+
+  const handleExecuteHold = async () => {
+    if (!holdAsset) return;
+    const activeRepair = holdAsset.repair_cycles?.find((c) => c.status === 'ACTIVE') || holdAsset.repair_cycles?.[0];
+    try {
+      setActionLoading(true);
+      await api.post('/repair/hold', {
+        cycle_id: activeRepair?.cycle_id || activeRepair?.id,
+        asset_number: holdAsset.asset_number,
+        reason: holdReason,
+        remarks: holdRemarks,
+      });
+      toast.success('Hold Applied', `Repair cycle paused for #${holdAsset.asset_number}`);
+      setShowHoldModal(false);
+      fetchAssets();
+    } catch (err: any) {
+      toast.error('Hold Failed', err.response?.data?.message || err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleOpenException = (asset: Asset) => {
+    setExceptionAsset(asset);
+    setExceptionType('DEFECT_FOUND');
+    setExceptionSeverity('HIGH');
+    setExceptionReason('');
+    setShowExceptionModal(true);
+  };
+
+  const handleExecuteException = async () => {
+    if (!exceptionAsset) return;
+    if (!exceptionReason.trim()) {
+      toast.error('Validation Error', 'Discrepancy description required');
+      return;
+    }
+    try {
+      setActionLoading(true);
+      await api.post('/exceptions', {
+        client_operation_id: `op-ex-${Date.now()}`,
+        asset_number: exceptionAsset.asset_number,
+        type: exceptionType,
+        severity: exceptionSeverity,
+        reason: exceptionReason.trim(),
+      });
+      toast.success('Exception Flagged', `Logged against #${exceptionAsset.asset_number}`);
+      setShowExceptionModal(false);
+      fetchAssets();
+    } catch (err: any) {
+      toast.error('Exception Failed', err.response?.data?.message || err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeactivate = async (assetNumber: string) => {
+    if (!confirm(`Are you sure you want to deactivate asset #${assetNumber}?`)) return;
+    try {
+      await api.delete(`/assets/${assetNumber}`);
+      toast.success('Deactivated', `Asset #${assetNumber} deactivated`);
+      fetchAssets();
+    } catch (err: any) {
+      toast.error('Failed', err.response?.data?.message || err.message);
+    }
+  };
+
+  const handleReactivate = async (assetNumber: string) => {
+    try {
+      await api.patch(`/assets/${assetNumber}`, { is_active: true });
+      toast.success('Reactivated', `Asset #${assetNumber} restored`);
+      fetchAssets();
+    } catch (err: any) {
+      toast.error('Failed', err.response?.data?.message || err.message);
+    }
+  };
+
+  const handleHardDelete = async (assetNumber: string) => {
+    if (!confirm(`[GOD MODE WARNING] Permanently delete asset #${assetNumber} and all its audit history?`)) return;
+    try {
+      await api.delete(`/assets/${assetNumber}?hard=true`);
+      toast.success('Deleted', `Asset #${assetNumber} permanently purged`);
+      fetchAssets();
+    } catch (err: any) {
+      toast.error('Failed', err.response?.data?.message || err.message);
+    }
+  };
+
+  const handleOpenEdit = (asset: Asset) => {
+    setEditingAsset({
+      ...asset,
+      asset_type: asset.asset_type || 'BOXNHL',
+      asset_category: asset.asset_category || 'WAGON',
+      wagon_sr: asset.wagon_sr || '',
+      rly: asset.rly || 'ER',
+      mod: asset.mod || '',
+      built_year: asset.built_year || new Date().getFullYear(),
+      action: asset.action || 'POH',
+      current_location: asset.current_location || 'NSY',
+      current_status: asset.current_status || 'IN_REPAIR',
+      origin: asset.origin || 'REPAIR',
+      is_active: asset.is_active !== false,
+      custom_fields: asset.custom_fields || {},
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
     if (!editingAsset) return;
     try {
-      setSaving(true);
-      await api.patch(`/assets/${editingAsset.asset_number}`, { 
+      setActionLoading(true);
+      await api.patch(`/assets/${editingAsset.asset_number}`, {
         asset_type: editingAsset.asset_type,
         current_status: editingAsset.current_status,
         current_location: editingAsset.current_location,
         wagon_sr: editingAsset.wagon_sr,
         rly: editingAsset.rly,
         mod: editingAsset.mod,
-        built_year: editingAsset.built_year,
-        action: editingAsset.action
+        built_year: Number(editingAsset.built_year),
+        action: editingAsset.action,
+        origin: editingAsset.origin,
+        is_active: editingAsset.is_active,
+        custom_fields: editingAsset.custom_fields,
       });
+      toast.success('Asset Updated', `Successfully updated #${editingAsset.asset_number}`);
       setIsEditOpen(false);
       setEditingAsset(null);
-      toast.success('Asset Updated', `Wagon ${editingAsset.asset_number} has been updated.`);
       fetchAssets();
     } catch (err: any) {
-      toast.error('Update Failed', err);
+      toast.error('Update Failed', err.response?.data?.message || err.message);
     } finally {
-      setSaving(false);
+      setActionLoading(false);
     }
   };
 
-  const exportToCSV = () => {
-    const csvData = assets.map(a => {
-      const base = {
-        'Asset Number': a.asset_number,
-        'Type': a.asset_type,
-        'Origin': a.origin,
-        'Current Status': a.current_status,
-        'Active': a.is_active ? 'Yes' : 'No'
-      };
-      
-      // Inject custom fields
-      if (formConfig && formConfig.customFields) {
-        formConfig.customFields.forEach((cf: any) => {
-          (base as any)[cf.label] = a.custom_fields && a.custom_fields[cf.key] ? a.custom_fields[cf.key] : '';
-        });
-      }
-      
-      return base;
-    });
+  const handleRegister = async () => {
+    if (!formData.asset_number.trim()) {
+      toast.error('Validation Error', 'Asset number required');
+      return;
+    }
+    try {
+      setActionLoading(true);
+      await api.post('/assets', {
+        ...formData,
+        built_year: Number(formData.built_year),
+      });
+      toast.success('Asset Registered', `Asset #${formData.asset_number} registered successfully`);
+      setIsRegisterOpen(false);
+      setFormData({
+        asset_number: '',
+        asset_category: 'WAGON',
+        asset_type: 'BOXNHL',
+        origin: 'REPAIR',
+        wagon_sr: '',
+        rly: 'ER',
+        mod: '',
+        built_year: new Date().getFullYear(),
+        action: 'POH',
+        current_location: 'NSY',
+        current_status: 'RECEIVED_NSY',
+        custom_fields: {},
+      });
+      fetchAssets();
+    } catch (err: any) {
+      toast.error('Registration Failed', err.response?.data?.message || err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
+  // CSV Export
+  const exportToCSV = () => {
+    if (!assets || assets.length === 0) {
+      toast.error('Export Empty', 'No assets available to export');
+      return;
+    }
+    const csvData = assets.map((a) => ({
+      'Asset Number': a.asset_number,
+      Category: a.asset_category,
+      Type: a.asset_type,
+      Location: a.current_location || 'N/A',
+      Status: a.current_status,
+      Origin: a.origin || 'REPAIR',
+      'Active State': a.is_active ? 'Active' : 'Inactive',
+      'Registered Date': a.createdAt ? new Date(a.createdAt).toLocaleDateString() : 'N/A',
+    }));
     const csv = Papa.unparse(csvData);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', 'assets_master_export.csv');
+    link.href = url;
+    link.setAttribute('download', `RSMTS_Assets_Export_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const openTimeline = async (asset_number: string) => {
-    setIsTimelineOpen(true);
-    setTimelineLoading(true);
-    setTimelineAsset(null);
-    try {
-      const res = await api.get(`/assets/${asset_number}`);
-      if (res.data.success) {
-        setTimelineAsset(res.data.data);
-      }
-    } catch (err: any) {
-      toast.error('Failed to load asset timeline', err);
-      setIsTimelineOpen(false);
-    } finally {
-      setTimelineLoading(false);
+  // Status Badge Styling Helper
+  const getStatusBadge = (status: string, isHeld: boolean) => {
+    if (isHeld) {
+      return { bg: '#FEF3C7', color: '#B45309', border: '#F59E0B', label: 'ON HOLD' };
     }
+    switch ((status || '').toUpperCase()) {
+      case 'FIT':
+      case 'DISPATCHED':
+        return { bg: '#DCFCE7', color: '#15803D', border: '#86EFAC', label: status };
+      case 'IN_REPAIR':
+      case 'SHOP IN':
+      case 'SHOP_IN':
+        return { bg: '#E0F2FE', color: '#0369A1', border: '#7DD3FC', label: 'IN REPAIR' };
+      case 'PENDING_QA':
+      case 'PENDING QA':
+        return { bg: '#EDE9FE', color: '#6D28D9', border: '#C4B5FD', label: 'PENDING QA' };
+      case 'RECEIVED_NSY':
+      case 'RECEIVED NSY':
+      case 'NSY IN':
+        return { bg: '#F1F5F9', color: '#334155', border: '#CBD5E1', label: 'RECEIVED NSY' };
+      default:
+        return { bg: '#F8FAFC', color: '#475569', border: '#E2E8F0', label: status || 'ACTIVE' };
+    }
+  };
+
+  // Category Icon & Label Helper
+  const getCategoryDetails = (asset: Asset) => {
+    const num = asset.asset_number;
+    const cat = (asset.asset_category || detectAssetCategory(num)).toUpperCase();
+    const isWagon = cat === 'WAGON' || num.length === 11;
+    const isLoco = cat === 'LOCO' || num.length === 5;
+    const isCrane = cat === 'CRANE' || (asset.asset_type || '').includes('CRANE') || num.startsWith('140') || num.startsWith('175');
+    const isTowerCar = cat === 'TOWER_CAR' || (asset.asset_type || '').includes('DETC') || (asset.asset_type || '').includes('DHTC');
+
+    if (isWagon) return { icon: '🚃', name: 'Wagon (11-Digit)', bg: '#EFF6FF', color: '#1E40AF', border: '#BFDBFE' };
+    if (isLoco) return { icon: '🚂', name: 'Locomotive', bg: '#FFFBEB', color: '#B45309', border: '#FDE68A' };
+    if (isCrane) return { icon: '🏗️', name: 'Breakdown Crane', bg: '#FAF5FF', color: '#7E22CE', border: '#E9D5FF' };
+    if (isTowerCar) return { icon: '🗼', name: 'Tower Car (OHE)', bg: '#ECFDF5', color: '#047857', border: '#A7F3D0' };
+    return { icon: '📦', name: cat, bg: '#F1F5F9', color: '#334155', border: '#CBD5E1' };
   };
 
   return (
     <div className={classes.container}>
-      <div className={classes.header}>
-        <h1 className={classes.title}>Assets Master {search && `(Search: ${search})`}</h1>
-        <div className={classes.actions}>
-          
-          <div style={{ display: 'flex', border: '1px solid var(--color-border)', borderRadius: '4px', overflow: 'hidden' }}>
-            <button 
-              onClick={() => setActiveFilter('true')}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                background: activeFilter === 'true' ? 'var(--color-primary-action)' : 'transparent',
-                color: activeFilter === 'true' ? 'white' : 'var(--color-text-primary)',
-                cursor: 'pointer',
-                fontWeight: activeFilter === 'true' ? 600 : 400
-              }}
-            >
-              Active
-            </button>
-            <button 
-              onClick={() => setActiveFilter('all')}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                borderLeft: '1px solid var(--color-border)',
-                borderRight: '1px solid var(--color-border)',
-                background: activeFilter === 'all' ? 'var(--color-primary-action)' : 'transparent',
-                color: activeFilter === 'all' ? 'white' : 'var(--color-text-primary)',
-                cursor: 'pointer',
-                fontWeight: activeFilter === 'all' ? 600 : 400
-              }}
-            >
-              All
-            </button>
-            <button 
-              onClick={() => setActiveFilter('false')}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                background: activeFilter === 'false' ? 'var(--color-primary-action)' : 'transparent',
-                color: activeFilter === 'false' ? 'white' : 'var(--color-text-primary)',
-                cursor: 'pointer',
-                fontWeight: activeFilter === 'false' ? 600 : 400
-              }}
-            >
-              Inactive
-            </button>
-          </div>
+      {/* Page Header */}
+      <div className={classes.headerRow}>
+        <div className={classes.titleArea}>
+          <span className={classes.breadcrumb}>Operational Directory • Rolling Stock Master</span>
+          <h1 className={classes.title}>
+            {initialSearch ? `Asset Search: ${initialSearch}` : 'Assets Master & Telemetry Directory'}
+          </h1>
+        </div>
 
-          <button className={classes.actionBtn} onClick={exportToCSV} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FiDownload /> Export CSV
+        <div className={classes.headerActions}>
+          <button className={classes.intakeBtn} onClick={() => setIsYardIntakeOpen(true)} title="Inward Yard Intake into NSY">
+            <FiPlus size={14} /> Yard Intake
           </button>
-          <button className={classes.primaryBtn} onClick={() => setIsRegisterOpen(true)}>
-            + Register Asset
+          <button className={classes.mfgBtn} onClick={() => setIsMfgOrderOpen(true)} title="Create New Build Manufacturing Order">
+            <FiBox size={14} /> New Mfg Order
+          </button>
+          <button className={classes.exceptionBtn} onClick={() => setIsGlobalExceptionOpen(true)} title="Report Defect or Hazard Exception">
+            <FiAlertTriangle size={14} /> Exception
+          </button>
+          <button className={classes.actionBtn} onClick={exportToCSV} title="Export Assets to CSV">
+            <FiDownload size={14} /> Export CSV
+          </button>
+          <button className={classes.primaryBtn} onClick={() => setIsRegisterOpen(true)} title="Register New Rolling Stock">
+            <FiPlus size={14} /> Register Asset
           </button>
         </div>
       </div>
 
-      <div className={classes.searchBar}>
-        <FiSearch className={classes.searchIcon} />
-        <input 
-          type="text" 
-          ref={searchInputRef}
-          placeholder="Search by 11-digit Wagon Number..." 
-          className={classes.searchInput}
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSearch();
-          }}
-        />
-        {searchInput && <button onClick={() => {setSearchInput(''); router.push('/assets');}} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}><FiX /></button>}
-      </div>
-
-      {error && <div style={{ color: 'var(--color-danger)' }}>{error}</div>}
-
-      {(() => {
-        const missingCount = assets.filter(a => a.current_status === 'Missing').length;
-        const condemnedCount = assets.filter(a => a.current_status === 'Condemned').length;
-        if (missingCount === 0 && condemnedCount === 0) return null;
-        return (
-          <div style={{ padding: '16px', backgroundColor: '#fee2e2', border: '1px solid #ef4444', borderRadius: '8px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h3 style={{ margin: '0 0 8px 0', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FiAlertTriangle /> Critical Exceptions Require Admin Attention
-              </h3>
-              <div style={{ color: '#7f1d1d', fontSize: '0.9rem' }}>
-                {missingCount > 0 && <span><strong>{missingCount}</strong> Wagons reported Missing. </span>}
-                {condemnedCount > 0 && <span><strong>{condemnedCount}</strong> Wagons flagged for Condemnation (Scrap).</span>}
-              </div>
-            </div>
-            <button 
-              onClick={() => setIsAdminModalOpen(true)}
-              style={{ backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+      {/* ================= COMPACT FILTER & CONTROLS TOOLBAR ================= */}
+      <div className={classes.toolbarSection}>
+        {/* Category Filter Pills */}
+        <div className={classes.filterGroup}>
+          <span className={classes.filterLabel}>Category:</span>
+          {['ALL', 'WAGON', 'LOCO', 'CRANE', 'TOWER_CAR'].map((cat) => (
+            <button
+              key={cat}
+              className={`${classes.filterPill} ${selectedCategory === cat ? classes.filterPillActive : ''}`}
+              onClick={() => setSelectedCategory(cat)}
             >
-              Resolve Exceptions
+              {cat === 'ALL' && 'All Fleet'}
+              {cat === 'WAGON' && '🚃 Wagons'}
+              {cat === 'LOCO' && '🚂 Locos'}
+              {cat === 'CRANE' && '🏗️ Cranes'}
+              {cat === 'TOWER_CAR' && '🗼 Tower Cars'}
             </button>
-          </div>
-        );
-      })()}
+          ))}
+        </div>
 
-      <div className={classes.tableContainer}>
-        <table className={classes.table}>
-          <thead>
-            <tr>
+        {/* Status Filter Pills */}
+        <div className={classes.filterGroup}>
+          <span className={classes.filterLabel}>Status:</span>
+          {['ALL', 'IN_REPAIR', 'ON_HOLD', 'RECEIVED_NSY', 'FIT'].map((st) => (
+            <button
+              key={st}
+              className={`${classes.filterPill} ${selectedStatus === st ? classes.filterPillActive : ''}`}
+              onClick={() => setSelectedStatus(st)}
+            >
+              {st === 'ALL' ? 'All Statuses' : st.replace('_', ' ')}
+            </button>
+          ))}
+        </div>
 
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiClock style={{ color: 'var(--color-primary-action)' }} /> NSY In <span className={classes.typeIndicator}>timestamp</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiType /> RS Sr <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiHash style={{ color: 'var(--color-primary-action)' }} /> RS No <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiBook style={{ color: 'var(--color-primary-action)' }} /> Category <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiType /> Rly <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiType style={{ color: 'var(--color-primary-action)' }} /> Type <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiType /> Mod <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiCalendar /> Built <span className={classes.typeIndicator}>int4</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiHash /> Age <span className={classes.typeIndicator}>int4</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiType /> Action <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiType /> Shop <span className={classes.typeIndicator}>text</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiClock /> Shop In <span className={classes.typeIndicator}>timestamp</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiClock /> Fit <span className={classes.typeIndicator}>timestamp</span>
-                </div>
-              </th>
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  <FiClock /> NSY Out <span className={classes.typeIndicator}>timestamp</span>
-                </div>
-              </th>
-              {formConfig && formConfig.customFields && formConfig.customFields.map((field: any) => (
-                <th key={field.key}>
-                  <div className={classes.tableHeaderCell}>
-                    <FiType /> {field.label} <span className={classes.typeIndicator}>{field.type}</span>
-                  </div>
-                </th>
-              ))}
-              <th>
-                <div className={classes.tableHeaderCell}>
-                  Actions
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={14 + (formConfig?.customFields?.length || 0)} className={classes.emptyState}>Loading assets...</td>
-              </tr>
-            ) : assets.length === 0 ? (
-              <tr>
-                <td colSpan={14 + (formConfig?.customFields?.length || 0)} className={classes.emptyState}>No assets found.</td>
-              </tr>
-            ) : (
-              assets.map((asset, index) => {
-                const isLast = index === assets.length - 1;
-                const age = asset.built_year ? new Date().getFullYear() - asset.built_year : '-';
-                
-                const formatDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-GB') : '-';
-
-                return (
-                  <tr 
-                    key={asset.asset_number} 
-                    ref={isLast ? lastElementRef : null}
-                    style={asset.is_active === false ? { backgroundColor: '#f9fafb', color: '#9ca3af', textDecoration: 'line-through' } : {}}
-                  >
-                  <td>{formatDate(asset.nsy_in_date)}</td>
-                  <td>{asset.wagon_sr || '-'}</td>
-                  <td>
-                    <strong>{asset.asset_number}</strong>
-                    {asset.is_active === false && <span style={{ marginLeft: '8px', fontSize: '0.7rem', color: '#ef4444', textDecoration: 'none' }}>(Inactive)</span>}
-                  </td>
-                  <td>
-                    <span style={{ fontWeight: 600 }}>{asset.asset_category}</span>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                      {asset.loco_type && <span>{asset.loco_type}</span>}
-                      {asset.crane_age_tag && <span>{asset.crane_age_tag}</span>}
-                      {asset.tc_variant && <span>{asset.tc_variant} ({asset.tc_zone})</span>}
-                    </div>
-                  </td>
-                  <td>{asset.rly || '-'}</td>
-                  <td>{asset.asset_type}</td>
-                  <td>{asset.mod || '-'}</td>
-                  <td>{asset.built_year || '-'}</td>
-                  <td>{age}</td>
-                  <td>{asset.action || '-'}</td>
-                  <td>{asset.current_location || '-'}</td>
-                  <td>{formatDate(asset.shop_in_date)}</td>
-                  <td>{formatDate(asset.fit_date)}</td>
-                  <td>{formatDate(asset.nsy_out_date)}</td>
-                  {formConfig && formConfig.customFields && formConfig.customFields.map((field: any) => (
-                    <td key={field.key}>{asset.custom_fields ? asset.custom_fields[field.key] || '-' : '-'}</td>
-                  ))}
-                  <td>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button 
-                        className={classes.actionBtn}
-                        onClick={() => openTimeline(asset.asset_number)}
-                        title="View Timeline"
-                      >
-                        <FiSearch style={{ marginRight: '4px', verticalAlign: 'middle' }} /> Timeline
-                      </button>
-
-                      <button 
-                        className={classes.actionBtn}
-                        onClick={() => {
-                          setEditingAsset(asset);
-                          setIsEditOpen(true);
-                        }}
-                      >
-                        <FiEdit2 style={{ marginRight: '4px', verticalAlign: 'middle' }} /> Edit
-                      </button>
-                      {asset.is_active !== false ? (
-                        <button 
-                          className={classes.actionBtn}
-                          onClick={() => handleDelete(asset.asset_number)}
-                        >
-                          Deactivate
-                        </button>
-                      ) : (
-                        <button 
-                          className={classes.actionBtn}
-                          style={{ color: '#059669', borderColor: '#059669' }}
-                          onClick={() => handleReactivate(asset.asset_number)}
-                        >
-                          Reactivate
-                        </button>
-                      )}
-                      {isAdmin && (
-                        <button 
-                          className={classes.actionBtn}
-                          style={{ color: '#ef4444', borderColor: '#ef4444' }}
-                          onClick={() => handleHardDelete(asset.asset_number)}
-                          title="Permanently Delete (God Mode)"
-                        >
-                          <FiTrash2 />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-                );
-              })
-            )}
-            {loadingMore && (
-              <tr>
-                <td colSpan={14 + (formConfig?.customFields?.length || 0)} className={classes.emptyState}>Loading more assets...</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      
-      <div style={{ padding: '8px 16px', backgroundColor: 'transparent', border: 'none', fontSize: '0.75rem', fontWeight: 300, color: 'var(--color-text-secondary)' }}>
-        <h4 style={{ margin: '0 0 8px 0', color: 'var(--color-text-secondary)', fontWeight: 400 }}><FiBook style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Assets Master Terminology & Guides</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '8px' }}>
-          <div>Wagon No: Must be a standard 11-digit IR identification number</div>
-          <div>Location: The current physical shop or yard the asset resides in</div>
-          <div>Status: The current lifecycle phase of the asset's repair process</div>
-          <div>BOXN / BCN / BTPN: Standard classifications for open, covered, or tank wagons</div>
-          <div>Workshop In / Out: Asset has officially entered or left the facility</div>
-          <div>Shop In: Asset is actively undergoing repairs in a shed</div>
-          <div>Fit / Not Fit: Asset passed or failed the final quality inspection</div>
-          <div><FiSearch style={{ verticalAlign: 'middle' }} /> Timeline: View the complete movement history of the asset</div>
-          <div><FiCamera style={{ verticalAlign: 'middle' }} /> Photos: View physical inspection evidence uploaded by field operators</div>
-          <div><FiEdit2 style={{ verticalAlign: 'middle' }} /> Edit / Deactivate: Modify asset type or permanently remove from tracking</div>
+        {/* Usable Action Controls on Toolbar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B' }}>
+            Fleet: <strong style={{ color: '#0F172A' }}>{assets.length}</strong> {assets.length === 1 ? 'Asset' : 'Assets'}
+          </span>
+          <button
+            className={classes.actionBtn}
+            style={{ padding: '5px 12px', fontSize: '12px', color: '#0284C7', borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }}
+            onClick={() => setIsRegisterOpen(true)}
+            title="Register new rolling stock asset"
+          >
+            <FiPlus size={12} /> Add Asset
+          </button>
         </div>
       </div>
 
-      {/* Photo Gallery Modal */}
-      {photoModalAsset && (
-        <div className={classes.modalOverlay} onClick={() => setPhotoModalAsset(null)}>
-          <div className={classes.modal} onClick={(e) => e.stopPropagation()}>
-            <div className={classes.modalHeader}>
-              <h3>Physical Inspection Photos: {photoModalAsset}</h3>
-              <button className={classes.closeBtn} onClick={() => setPhotoModalAsset(null)}><FiX /></button>
-            </div>
-            <div className={classes.modalContent}>
-              <div className={classes.photoPlaceholder}>
-                <p>No photos uploaded from the shop floor yet.</p>
-              </div>
-              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', textAlign: 'center' }}>
-                Photos synced via WatermelonDB offline sync will appear here.
-              </p>
-            </div>
+      {/* Active Search Result Feedback Banner */}
+      {initialSearch && (
+        <div className={classes.resultBanner}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FiCheckCircle size={16} />
+            <span>
+              Showing search results for &ldquo;<strong>{initialSearch}</strong>&rdquo; ({assets.length} {assets.length === 1 ? 'rolling stock asset' : 'rolling stock assets'} found)
+            </span>
           </div>
+          <button
+            className={classes.clearSearchBtn}
+            onClick={handleClearSearch}
+            title="Clear global search filter"
+          >
+            Clear Search ✕
+          </button>
         </div>
       )}
 
-      {/* Register Asset Modal */}
-      {isRegisterOpen && (
-        <div className={classes.modalOverlay} onClick={() => setIsRegisterOpen(false)}>
-          <div className={classes.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-            <div className={classes.modalHeader}>
-              <h3>Register New Asset</h3>
-              <button className={classes.closeBtn} onClick={() => setIsRegisterOpen(false)}><FiX /></button>
-            </div>
-            <form className={classes.modalContent} onSubmit={handleRegister}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className={classes.inputGroup}>
-                  <label>RS Number</label>
-                  <input 
-                    type="text"
-                    required
-                    className={classes.input}
-                    value={formData.asset_number}
-                    onChange={(e) => setFormData({...formData, asset_number: e.target.value})}
-                    placeholder="e.g. 12345678901"
-                  />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Origin</label>
-                  <input 
-                    type="text" 
-                    className={classes.input} 
-                    value={formData.origin} 
-                    onChange={(e) => setFormData({...formData, origin: e.target.value})} 
-                  />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Asset Category</label>
-                  <select 
-                    className={classes.input}
-                    value={formData.asset_category}
-                    onChange={(e) => {
-                      const newCategory = e.target.value;
-                      let newType = 'BOXNHL';
-                      if (formConfig) {
-                        if (newCategory === 'WAGON') newType = formConfig.wagonTypes[0];
-                        if (newCategory === 'LOCO') newType = formConfig.locoTypes[0];
-                        if (newCategory === 'CRANE') newType = formConfig.craneTypes[0];
-                      }
-                      setFormData({...formData, asset_category: newCategory, asset_type: newType});
+      {/* Loading State */}
+      {loading && (
+        <div className={classes.emptyState}>
+          <FiClock className={classes.emptyIcon} style={{ animation: 'spin 1.5s linear infinite' }} />
+          <h3 className={classes.emptyTitle}>Scanning Rolling Stock Master...</h3>
+          <p className={classes.emptySubtitle}>Querying database records across 68 workshop track lines and repair bays.</p>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!loading && assets.length === 0 && (
+        <div className={classes.emptyState}>
+          <FiAlertTriangle className={classes.emptyIcon} />
+          <h3 className={classes.emptyTitle}>No Rolling Stock Matching Query</h3>
+          <p className={classes.emptySubtitle}>
+            No assets found for &ldquo;{initialSearch}&rdquo;. Try searching by 11-digit wagon number, 5-digit loco number, or reset filters.
+          </p>
+          <button className={classes.actionBtn} onClick={handleClearSearch} style={{ marginTop: '8px' }}>
+            Reset Filters
+          </button>
+        </div>
+      )}
+
+      {/* ================= VIEW 1: FULL-WIDTH ASSET CARDS WITH ALL CONTROLS ================= */}
+      {!loading && assets.length > 0 && viewMode === 'CARDS' && (
+        <div className={classes.cardsContainer}>
+          {assets.map((asset) => {
+            const cat = getCategoryDetails(asset);
+            const activeRepair = asset.repair_cycles?.find((c) => c.status === 'ACTIVE') || asset.repair_cycles?.[0];
+            const activeHold = activeRepair?.holds?.find((h) => !h.released_at);
+            const isHeld = asset.current_status === 'ON_HOLD' || !!activeHold;
+            const statusStyle = getStatusBadge(asset.current_status, isHeld);
+            const isWagon = (asset.asset_category || '').toUpperCase() === 'WAGON' || asset.asset_number.length === 11;
+            const wagonData = isWagon && asset.asset_number.length === 11 ? decodeWagonNumber(asset.asset_number) : null;
+            const isSpotlight = initialSearch && asset.asset_number.includes(initialSearch);
+
+            const lastMove = asset.movements?.[0] || asset.movement_logs?.[0];
+            const supervisor = typeof lastMove?.handler === 'string' 
+              ? lastMove.handler 
+              : lastMove?.handler?.full_name || 'System Supervisor';
+
+            return (
+              <div
+                key={asset.id || asset.asset_number}
+                className={`${classes.assetCard} ${isSpotlight ? classes.assetCardSpotlight : ''}`}
+              >
+                {isSpotlight && <span className={classes.spotlightBadge}>🎯 Direct Match</span>}
+
+                {/* Card Top Row: Identity, Type, Status */}
+                <div className={classes.cardHeader}>
+                  <div className={classes.assetNumberArea}>
+                    <span className={classes.categoryIcon}>{cat.icon}</span>
+                    <span className={classes.assetNumber}>#{asset.asset_number}</span>
+
+                    {/* Category Tag */}
+                    <span
+                      className={classes.categoryPill}
+                      style={{ backgroundColor: cat.bg, color: cat.color, border: `1px solid ${cat.border}` }}
+                    >
+                      {asset.asset_type || cat.name}
+                    </span>
+
+                    {/* Wagon 11-Digit Check Digit Pill */}
+                    {wagonData && (
+                      <span
+                        className={classes.checkDigitPill}
+                        style={{
+                          backgroundColor: wagonData.isValidCheckDigit ? '#DCFCE7' : '#FEE2E2',
+                          color: wagonData.isValidCheckDigit ? '#15803D' : '#DC2626',
+                          border: `1px solid ${wagonData.isValidCheckDigit ? '#86EFAC' : '#FCA5A5'}`,
+                        }}
+                        title={`Check digit calculation: ${wagonData.enteredCheckDigit}`}
+                      >
+                        {wagonData.isValidCheckDigit ? <FiCheck size={11} /> : <FiAlertTriangle size={11} />}
+                        CD: {wagonData.enteredCheckDigit} {wagonData.isValidCheckDigit ? '✓' : '⚠️'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Operational Status Pill */}
+                  <span
+                    className={classes.statusPill}
+                    style={{
+                      backgroundColor: statusStyle.bg,
+                      color: statusStyle.color,
+                      border: `1px solid ${statusStyle.border}`,
                     }}
                   >
-                    <option value="WAGON">WAGON</option>
-                    <option value="LOCO">LOCOMOTIVE</option>
-                    <option value="CRANE">CRANE</option>
-                    <option value="TOWER_CAR">TOWER CAR</option>
-                  </select>
+                    ● {statusStyle.label}
+                  </span>
                 </div>
-                <div className={classes.inputGroup}>
-                  <label>Asset Type</label>
-                  <select 
-                    className={classes.input}
-                    value={formData.asset_type}
-                    onChange={(e) => setFormData({...formData, asset_type: e.target.value})}
-                  >
-                    {formConfig ? (
-                      formData.asset_category === 'WAGON' ? formConfig.wagonTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
-                      formData.asset_category === 'LOCO' ? formConfig.locoTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
-                      formData.asset_category === 'CRANE' ? formConfig.craneTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
-                      <option value="DETC">DETC</option>
-                    ) : (
-                      <option value="BOXNHL">BOXNHL</option>
-                    )}
-                  </select>
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Wagon Sr. (Sl No.)</label>
-                  <input type="text" className={classes.input} value={formData.wagon_sr} onChange={(e) => setFormData({...formData, wagon_sr: e.target.value})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Railway Zone (Rly)</label>
-                  <input type="text" className={classes.input} value={formData.rly} onChange={(e) => setFormData({...formData, rly: e.target.value})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Modification (Mod)</label>
-                  <input type="text" className={classes.input} value={formData.mod} onChange={(e) => setFormData({...formData, mod: e.target.value})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Built Year</label>
-                  <input type="number" className={classes.input} value={formData.built_year} onChange={(e) => setFormData({...formData, built_year: parseInt(e.target.value)})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Action</label>
-                  <select 
-                    className={classes.input} 
-                    value={formData.action} 
-                    onChange={(e) => setFormData({...formData, action: e.target.value})}
-                  >
-                    {formConfig ? formConfig.actions.map((act: string) => (
-                      <option key={act} value={act}>{act}</option>
-                    )) : (
-                      <option value="POH">POH</option>
-                    )}
-                  </select>
-                </div>
-                {formConfig && formConfig.customFields && formConfig.customFields.map((field: any) => (
-                  <div className={classes.inputGroup} key={field.key}>
-                    <label>{field.label}</label>
-                    <input 
-                      type={field.type === 'number' ? 'number' : 'text'} 
-                      className={classes.input} 
-                      value={formData.custom_fields[field.key] || ''} 
-                      onChange={(e) => setFormData({
-                        ...formData, 
-                        custom_fields: { ...formData.custom_fields, [field.key]: e.target.value }
-                      })} 
-                    />
+
+                {/* Card Telemetry Body */}
+                <div className={classes.cardBody}>
+                  <div className={classes.telemetryItem}>
+                    <span className={classes.telemetryLabel}>
+                      <FiMapPin size={11} color="#0284C7" /> Current Location
+                    </span>
+                    <span className={classes.telemetryValue}>
+                      {asset.current_location || 'NSY Staging Yard'}
+                    </span>
                   </div>
-                ))}
+
+                  <div className={classes.telemetryItem}>
+                    <span className={classes.telemetryLabel}>
+                      <FiClock size={11} color="#64748B" /> Overhaul Cycle
+                    </span>
+                    <span className={classes.telemetryValue}>
+                      {activeRepair?.repair_category?.id || asset.action || 'POH Overhaul'}
+                      {activeRepair?.repair_category?.standard_tat_hours ? ` (${activeRepair.repair_category.standard_tat_hours}h TAT)` : ''}
+                    </span>
+                  </div>
+
+                  <div className={classes.telemetryItem}>
+                    <span className={classes.telemetryLabel}>
+                      <FiUser size={11} color="#64748B" /> Supervisor
+                    </span>
+                    <span className={classes.telemetryValue}>
+                      {supervisor}
+                    </span>
+                  </div>
+
+                  <div className={classes.telemetryItem}>
+                    <span className={classes.telemetryLabel}>
+                      <FiActivity size={11} color="#15803D" /> Pipeline Mode
+                    </span>
+                    <span className={classes.telemetryValue}>
+                      {asset.origin === 'MANUFACTURING' ? '🏗️ Manufacturing' : '🔧 Repair Overhaul'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Active Hold Alert Banner (If On Hold) */}
+                {isHeld && (
+                  <div className={classes.holdBanner}>
+                    <div className={classes.holdBannerText}>
+                      <FiPause size={14} color="#B45309" />
+                      <span>
+                        <strong>Overhaul Paused:</strong> [{activeHold?.reason || 'MATERIAL_SHORTAGE'}]
+                        {activeHold?.remarks ? ` — ${activeHold.remarks}` : ''}
+                      </span>
+                    </div>
+                    <button
+                      className={classes.resumeBtn}
+                      onClick={() => handleToggleHold(asset)}
+                      disabled={actionLoading}
+                    >
+                      <FiPlay size={11} /> Resume Overhaul
+                    </button>
+                  </div>
+                )}
+
+                {/* Open Exceptions Alert Banner */}
+                {asset.exceptions && asset.exceptions.length > 0 && (
+                  <div className={classes.exceptionBanner}>
+                    <FiAlertOctagon size={14} color="#DC2626" />
+                    <span>
+                      <strong>Exception Flagged:</strong> {asset.exceptions[0]?.type} (Severity: {asset.exceptions[0]?.severity})
+                    </span>
+                  </div>
+                )}
+
+                {/* ================= ALL ADMIN CONTROLS ROW ================= */}
+                <div className={classes.cardControlsArea}>
+                  <div className={classes.controlsLabel}>Operational Controls & Actions</div>
+                  <div className={classes.controlsRow}>
+                    {/* 1. Shunt / Move */}
+                    <button
+                      className={`${classes.controlBtn} ${classes.controlBtnPrimary}`}
+                      onClick={() => handleOpenShunt(asset)}
+                      title="Shunt or move asset to another shop or track line"
+                    >
+                      <FiTruck size={13} /> Shunt / Move
+                    </button>
+
+                    {/* 2. Hold / Resume */}
+                    <button
+                      className={`${classes.controlBtn} ${isHeld ? classes.controlBtnSuccess : classes.controlBtnWarning}`}
+                      onClick={() => handleToggleHold(asset)}
+                      title={isHeld ? 'Resume paused repair cycle' : 'Pause repair cycle for material/sanction hold'}
+                      disabled={actionLoading}
+                    >
+                      {isHeld ? <FiPlay size={13} /> : <FiPause size={13} />}
+                      {isHeld ? 'Resume Overhaul' : 'Put on Hold'}
+                    </button>
+
+                    {/* 3. Report Exception */}
+                    <button
+                      className={`${classes.controlBtn} ${classes.controlBtnDanger}`}
+                      onClick={() => handleOpenException(asset)}
+                      title="Report defect or safety exception"
+                    >
+                      <FiAlertTriangle size={13} /> Exception
+                    </button>
+
+                    {/* 4. Lifetime Activity Timeline */}
+                    <button
+                      className={`${classes.controlBtn} ${classes.controlBtnTimeline}`}
+                      onClick={() => setDetailModalAsset(asset.asset_number)}
+                      title="View complete lifetime activity history & telemetry"
+                    >
+                      <FiActivity size={13} /> Lifetime Timeline
+                    </button>
+
+                    {/* 5. Edit Asset */}
+                    <button
+                      className={`${classes.controlBtn} ${classes.controlBtnEdit}`}
+                      onClick={() => handleOpenEdit(asset)}
+                      title="Edit rolling stock parameters and metadata"
+                    >
+                      <FiEdit2 size={13} /> Edit Asset
+                    </button>
+
+                    {/* 6. Deactivate / Delete */}
+                    {asset.is_active ? (
+                      <button
+                        className={`${classes.controlBtn} ${classes.controlBtnSecondary}`}
+                        style={{ color: '#DC2626' }}
+                        onClick={() => handleDeactivate(asset.asset_number)}
+                        title="Deactivate asset from active fleet"
+                      >
+                        Deactivate
+                      </button>
+                    ) : (
+                      <button
+                        className={`${classes.controlBtn} ${classes.controlBtnSuccess}`}
+                        onClick={() => handleReactivate(asset.asset_number)}
+                        title="Reactivate asset"
+                      >
+                        Reactivate
+                      </button>
+                    )}
+
+                    {/* Admin God Mode Hard Delete */}
+                    {isAdmin && (
+                      <button
+                        className={`${classes.controlBtn} ${classes.controlBtnDanger}`}
+                        onClick={() => handleHardDelete(asset.asset_number)}
+                        title="Permanently Purge Asset (Admin God Mode)"
+                      >
+                        <FiTrash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-              <button type="submit" className={classes.saveBtn} disabled={saving} style={{ marginTop: '16px' }}>
-                {saving ? 'Registering...' : 'Register Asset'}
+            );
+          })}
+        </div>
+      )}
+
+      {/* ================= VIEW 2: MODERN COMPACT TABLE ================= */}
+      {!loading && assets.length > 0 && viewMode === 'TABLE' && (
+        <div className={classes.tableContainer}>
+          <table className={classes.table}>
+            <thead>
+              <tr>
+                <th>Asset Number</th>
+                <th>Category & Type</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Pipeline / Cycle</th>
+                <th>Supervisor</th>
+                <th style={{ textAlign: 'right' }}>Controls</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assets.map((asset) => {
+                const cat = getCategoryDetails(asset);
+                const activeRepair = asset.repair_cycles?.find((c) => c.status === 'ACTIVE') || asset.repair_cycles?.[0];
+                const activeHold = activeRepair?.holds?.find((h) => !h.released_at);
+                const isHeld = asset.current_status === 'ON_HOLD' || !!activeHold;
+                const statusStyle = getStatusBadge(asset.current_status, isHeld);
+                const isWagon = (asset.asset_category || '').toUpperCase() === 'WAGON' || asset.asset_number.length === 11;
+                const wagonData = isWagon && asset.asset_number.length === 11 ? decodeWagonNumber(asset.asset_number) : null;
+                const lastMove = asset.movements?.[0] || asset.movement_logs?.[0];
+                const supervisor = typeof lastMove?.handler === 'string' 
+                  ? lastMove.handler 
+                  : lastMove?.handler?.full_name || 'System Staff';
+
+                return (
+                  <tr key={asset.id || asset.asset_number}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '16px' }}>{cat.icon}</span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '14px', color: '#0F172A' }}>
+                          #{asset.asset_number}
+                        </span>
+                        {wagonData && (
+                          <span
+                            className={classes.checkDigitPill}
+                            style={{
+                              backgroundColor: wagonData.isValidCheckDigit ? '#DCFCE7' : '#FEE2E2',
+                              color: wagonData.isValidCheckDigit ? '#15803D' : '#DC2626',
+                            }}
+                          >
+                            CD: {wagonData.enteredCheckDigit} {wagonData.isValidCheckDigit ? '✓' : '⚠️'}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td>
+                      <span style={{ fontWeight: 600, color: '#334155' }}>
+                        {asset.asset_type || cat.name}
+                      </span>
+                    </td>
+
+                    <td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600, color: '#0284C7' }}>
+                        <FiMapPin size={13} /> {asset.current_location || 'NSY'}
+                      </span>
+                    </td>
+
+                    <td>
+                      <span
+                        className={classes.statusPill}
+                        style={{
+                          backgroundColor: statusStyle.bg,
+                          color: statusStyle.color,
+                          border: `1px solid ${statusStyle.border}`,
+                        }}
+                      >
+                        ● {statusStyle.label}
+                      </span>
+                    </td>
+
+                    <td>
+                      <span style={{ fontSize: '12px', color: '#475569' }}>
+                        {activeRepair?.repair_category?.id || asset.action || 'POH'}
+                      </span>
+                    </td>
+
+                    <td>
+                      <span style={{ fontSize: '12px', color: '#64748B' }}>
+                        {supervisor}
+                      </span>
+                    </td>
+
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '6px' }}>
+                        <button
+                          className={`${classes.controlBtn} ${classes.controlBtnPrimary}`}
+                          style={{ padding: '4px 8px', fontSize: '11px' }}
+                          onClick={() => handleOpenShunt(asset)}
+                          title="Shunt / Move"
+                        >
+                          <FiTruck size={12} /> Shunt
+                        </button>
+                        <button
+                          className={`${classes.controlBtn} ${isHeld ? classes.controlBtnSuccess : classes.controlBtnWarning}`}
+                          style={{ padding: '4px 8px', fontSize: '11px' }}
+                          onClick={() => handleToggleHold(asset)}
+                          title={isHeld ? 'Resume Overhaul' : 'Put on Hold'}
+                        >
+                          {isHeld ? <FiPlay size={12} /> : <FiPause size={12} />}
+                          {isHeld ? 'Resume' : 'Hold'}
+                        </button>
+                        <button
+                          className={`${classes.controlBtn} ${classes.controlBtnSecondary}`}
+                          style={{ padding: '4px 8px', fontSize: '11px' }}
+                          onClick={() => setDetailModalAsset(asset.asset_number)}
+                          title="Lifetime Activity & Controls"
+                        >
+                          <FiActivity size={12} /> Details
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ================= MODAL 1: SHUNT / MOVE DRAWER ================= */}
+      {showShuntModal && shuntAsset && (
+        <div className={classes.modalOverlay} onClick={() => setShowShuntModal(false)}>
+          <div className={classes.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={classes.modalHeader}>
+              <h3>
+                <FiTruck color="#0284C7" /> Shunt & Transfer Rolling Stock #{shuntAsset.asset_number}
+              </h3>
+              <button className={classes.closeBtn} onClick={() => setShowShuntModal(false)}>
+                <FiX />
               </button>
-            </form>
+            </div>
+
+            <div className={classes.modalBody}>
+              <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 14px', fontSize: '13px' }}>
+                <div><strong>Current Location:</strong> {shuntAsset.current_location || 'NSY Staging Yard'}</div>
+                <div><strong>Current Status:</strong> {shuntAsset.current_status}</div>
+                <div><strong>Category / Type:</strong> {shuntAsset.asset_category} ({shuntAsset.asset_type})</div>
+              </div>
+
+              <div className={classes.formGroup}>
+                <label>Destination Location (68 Topology Nodes):</label>
+                <select
+                  className={classes.formSelect}
+                  value={targetLocation}
+                  onChange={(e) => setTargetLocation(e.target.value)}
+                >
+                  <optgroup label="Shops & Production Sheds">
+                    {locations
+                      .filter((l) => ['SHOP', 'SHED'].includes(l.location_type))
+                      .map((loc) => (
+                        <option key={loc.location_id} value={loc.location_id}>
+                          {loc.name} ({loc.location_id}) — Occ: {loc.current_occupancy || 0}/{loc.max_capacity}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Track Lines 01–56 & Yards">
+                    {locations
+                      .filter((l) => ['YARD', 'TRACK_LINE'].includes(l.location_type))
+                      .map((loc) => (
+                        <option key={loc.location_id} value={loc.location_id}>
+                          {loc.name} ({loc.location_id}) — Occ: {loc.current_occupancy || 0}/{loc.max_capacity}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="All Other Workshop Locations">
+                    {locations
+                      .filter((l) => !['SHOP', 'SHED', 'YARD', 'TRACK_LINE'].includes(l.location_type))
+                      .map((loc) => (
+                        <option key={loc.location_id} value={loc.location_id}>
+                          {loc.name} ({loc.location_id})
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div className={classes.formGroup}>
+                <label>New Operational Status Post-Movement:</label>
+                <select
+                  className={classes.formSelect}
+                  value={targetStatus}
+                  onChange={(e) => setTargetStatus(e.target.value)}
+                >
+                  <option value="IN_REPAIR">IN_REPAIR (Work In Progress)</option>
+                  <option value="SHOP_IN">SHOP_IN (Admitted to Bay)</option>
+                  <option value="RECEIVED_NSY">RECEIVED_NSY (Inward Yard Staged)</option>
+                  <option value="PENDING_QA">PENDING_QA (Awaiting WRS-5 Testing)</option>
+                  <option value="FIT">FIT (QA Certified)</option>
+                  <option value="DISPATCHED">DISPATCHED (Outturn Outbound)</option>
+                </select>
+              </div>
+
+              <div className={classes.formGroup}>
+                <label>Movement & Shunting Remarks:</label>
+                <textarea
+                  className={classes.formTextarea}
+                  rows={2}
+                  value={shuntRemarks}
+                  onChange={(e) => setShuntRemarks(e.target.value)}
+                  placeholder="e.g. Shunted from WRS-1 to WRS-2 for heavy wheelset and bogie overhaul"
+                />
+              </div>
+            </div>
+
+            <div className={classes.modalFooter}>
+              <button className={classes.cancelBtn} onClick={() => setShowShuntModal(false)}>
+                Cancel
+              </button>
+              <button
+                className={classes.submitBtn}
+                onClick={handleExecuteShunt}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Logging Movement...' : 'Confirm Shunt Movement'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Edit Asset Modal */}
-      {isEditOpen && editingAsset && (
-        <div className={classes.modalOverlay} onClick={() => setIsEditOpen(false)}>
-          <div className={classes.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+      {/* ================= MODAL 2: HOLD REPAIR REASON MODAL ================= */}
+      {showHoldModal && holdAsset && (
+        <div className={classes.modalOverlay} onClick={() => setShowHoldModal(false)}>
+          <div className={classes.modal} onClick={(e) => e.stopPropagation()}>
             <div className={classes.modalHeader}>
-              <h3>Edit Asset: {editingAsset.asset_number}</h3>
-              <button className={classes.closeBtn} onClick={() => setIsEditOpen(false)}><FiX /></button>
+              <h3>
+                <FiPause color="#D97706" /> Place Asset #{holdAsset.asset_number} On Hold (Pause TAT)
+              </h3>
+              <button className={classes.closeBtn} onClick={() => setShowHoldModal(false)}>
+                <FiX />
+              </button>
             </div>
-            <form className={classes.modalContent} onSubmit={handleEdit}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className={classes.inputGroup}>
-                  <label>Wagon Number</label>
-                  <input 
+
+            <div className={classes.modalBody}>
+              <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>
+                Placing this asset on hold will pause the standard Turn-Around Time (TAT) clock and flag the repair stoppage on the management dashboard.
+              </p>
+
+              <div className={classes.formGroup}>
+                <label>Stoppage Root Cause Reason:</label>
+                <select
+                  className={classes.formSelect}
+                  value={holdReason}
+                  onChange={(e) => setHoldReason(e.target.value)}
+                >
+                  <option value="MATERIAL_SHORTAGE">MATERIAL_SHORTAGE (Spare Parts / Stores Non-Availability)</option>
+                  <option value="SANCTION_PENDING">SANCTION_PENDING (Awaiting HQ / Divisional Financial Sanction)</option>
+                  <option value="UNSCHEDULED_DEFECT">UNSCHEDULED_DEFECT (Major Structural / Wheel Crack Detected)</option>
+                  <option value="LINE_BLOCK">LINE_BLOCK (Shop Track Maintenance Stoppage)</option>
+                  <option value="OTHER">OTHER (Special Investigation)</option>
+                </select>
+              </div>
+
+              <div className={classes.formGroup}>
+                <label>Hold Explanation & Store Requisition Details:</label>
+                <textarea
+                  className={classes.formTextarea}
+                  rows={3}
+                  value={holdRemarks}
+                  onChange={(e) => setHoldRemarks(e.target.value)}
+                  placeholder="e.g. Awaiting delivery of 2x CTRB bearings and CBC draft gear from Stores Depot"
+                />
+              </div>
+            </div>
+
+            <div className={classes.modalFooter}>
+              <button className={classes.cancelBtn} onClick={() => setShowHoldModal(false)}>
+                Cancel
+              </button>
+              <button
+                className={classes.submitBtn}
+                style={{ backgroundColor: '#D97706', borderColor: '#D97706' }}
+                onClick={handleExecuteHold}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Applying Hold...' : 'Confirm Repair Hold'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 3: REPORT EXCEPTION MODAL ================= */}
+      {showExceptionModal && exceptionAsset && (
+        <div className={classes.modalOverlay} onClick={() => setShowExceptionModal(false)}>
+          <div className={classes.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={classes.modalHeader}>
+              <h3>
+                <FiAlertTriangle color="#DC2626" /> Report Exception on Asset #{exceptionAsset.asset_number}
+              </h3>
+              <button className={classes.closeBtn} onClick={() => setShowExceptionModal(false)}>
+                <FiX />
+              </button>
+            </div>
+
+            <div className={classes.modalBody}>
+              <div className={classes.formGroup}>
+                <label>Discrepancy / Failure Classification:</label>
+                <select
+                  className={classes.formSelect}
+                  value={exceptionType}
+                  onChange={(e) => setExceptionType(e.target.value)}
+                >
+                  <option value="DEFECT_FOUND">DEFECT_FOUND (Physical or Component Flaw Identified)</option>
+                  <option value="MISSING_ASSET">MISSING_ASSET (Asset not found at designated yard/track)</option>
+                  <option value="SAFETY_HAZARD">SAFETY_HAZARD (Brake Pipe / Coupler Safety Violation)</option>
+                  <option value="REPAIR_REJECTED">REPAIR_REJECTED (Failed Stage Inspection QA)</option>
+                </select>
+              </div>
+
+              <div className={classes.formGroup}>
+                <label>Severity Level:</label>
+                <select
+                  className={classes.formSelect}
+                  value={exceptionSeverity}
+                  onChange={(e) => setExceptionSeverity(e.target.value)}
+                >
+                  <option value="LOW">LOW (Informational / Minor Rectification)</option>
+                  <option value="MEDIUM">MEDIUM (Requires Supervisor Attention)</option>
+                  <option value="HIGH">HIGH (Blocks Subsequent Stages)</option>
+                  <option value="CRITICAL">CRITICAL (Executive Alert & Workshop Escalation)</option>
+                </select>
+              </div>
+
+              <div className={classes.formGroup}>
+                <label>Discrepancy Details & Findings:</label>
+                <textarea
+                  className={classes.formTextarea}
+                  rows={3}
+                  value={exceptionReason}
+                  onChange={(e) => setExceptionReason(e.target.value)}
+                  placeholder="Detail the exact defect or missing component found..."
+                />
+              </div>
+            </div>
+
+            <div className={classes.modalFooter}>
+              <button className={classes.cancelBtn} onClick={() => setShowExceptionModal(false)}>
+                Cancel
+              </button>
+              <button
+                className={classes.submitBtn}
+                style={{ backgroundColor: '#DC2626', borderColor: '#DC2626' }}
+                onClick={handleExecuteException}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Logging Exception...' : 'Report Exception'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 4: FULL ASSET DETAIL MODAL WITH LIFETIME TIMELINE ================= */}
+      {detailModalAsset && (
+        <AssetDetailModal
+          assetNumber={detailModalAsset}
+          onClose={() => setDetailModalAsset(null)}
+          onAssetUpdated={() => {
+            fetchAssets();
+          }}
+        />
+      )}
+
+      {/* ================= MODAL 5: COMPREHENSIVE REGISTER ASSET MODAL ================= */}
+      {isRegisterOpen && (
+        <div className={classes.modalOverlay} onClick={() => setIsRegisterOpen(false)}>
+          <div className={`${classes.modal} ${classes.modalWide}`} onClick={(e) => e.stopPropagation()}>
+            <div className={classes.modalHeader}>
+              <h3>
+                <FiPlus color="#0284C7" /> Register New Rolling Stock Asset
+              </h3>
+              <button className={classes.closeBtn} onClick={() => setIsRegisterOpen(false)}>
+                <FiX />
+              </button>
+            </div>
+
+            <div className={classes.modalBody}>
+              {/* Form Row 1: Category & Asset Number */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Asset Category:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={formData.asset_category}
+                    onChange={(e) => {
+                      const cat = e.target.value;
+                      setFormData({ 
+                        ...formData, 
+                        asset_category: cat,
+                        asset_type: cat === 'LOCO' ? 'WAG9' : cat === 'CRANE' ? '140T_CRANE' : cat === 'TOWER_CAR' ? '8W_DETC' : 'BOXNHL'
+                      });
+                    }}
+                  >
+                    <option value="WAGON">WAGON (11-Digit IR Freight Wagon)</option>
+                    <option value="LOCO">LOCO (5-Digit IR Locomotive Road No.)</option>
+                    <option value="CRANE">CRANE (6-Digit Heavy Breakdown Crane)</option>
+                    <option value="TOWER_CAR">TOWER_CAR (OHE Inspection Tower Car)</option>
+                  </select>
+                </div>
+                <div className={classes.formGroup}>
+                  <label>
+                    Asset Number ({formData.asset_category === 'WAGON' ? '11-Digit IR Format' : 'Identifier'}):
+                  </label>
+                  <input
                     type="text"
-                    disabled
-                    className={classes.input}
-                    value={editingAsset.asset_number}
-                    style={{ backgroundColor: '#F3F4F6', color: '#9CA3AF' }}
+                    className={classes.formInput}
+                    placeholder={formData.asset_category === 'WAGON' ? 'e.g. 21021845128' : formData.asset_category === 'LOCO' ? 'e.g. 30215' : 'e.g. 140012'}
+                    value={formData.asset_number}
+                    onChange={(e) => setFormData({ ...formData, asset_number: e.target.value.trim().toUpperCase() })}
+                  />
+                  {formData.asset_category === 'WAGON' && formData.asset_number.length === 11 && (
+                    <div style={{ fontSize: '11px', marginTop: '4px' }}>
+                      {(() => {
+                        const val = validateAssetNumber(formData.asset_number, 'WAGON');
+                        return val.isValid ? (
+                          <span style={{ color: '#15803D', fontWeight: 600 }}>✓ Valid 11-digit IR check digit verified</span>
+                        ) : (
+                          <span style={{ color: '#DC2626', fontWeight: 600 }}>
+                            ⚠️ Check digit mismatch! Expected: {val.autoFix?.slice(-1)}
+                            {val.autoFix && (
+                              <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, asset_number: val.autoFix! })}
+                                style={{ marginLeft: '6px', fontSize: '11px', padding: '1px 6px', borderRadius: '4px', border: '1px solid #DC2626', background: '#FEF2F2', color: '#DC2626', cursor: 'pointer' }}
+                              >
+                                Auto-fix to {val.autoFix}
+                              </button>
+                            )}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Form Row 2: Subtype & Railway Zone */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Subtype / Classification:</label>
+                  <input
+                    type="text"
+                    className={classes.formInput}
+                    placeholder="e.g. BOXNHL, BCNHL, BTPN, WAG-9, 140T"
+                    value={formData.asset_type}
+                    onChange={(e) => setFormData({ ...formData, asset_type: e.target.value })}
                   />
                 </div>
-                <div className={classes.inputGroup}>
-                  <label>Asset Type</label>
-                  <select 
-                    className={classes.input}
-                    value={editingAsset.asset_type}
-                    onChange={(e) => setEditingAsset({...editingAsset, asset_type: e.target.value})}
+                <div className={classes.formGroup}>
+                  <label>Railway Zone (Rly):</label>
+                  <select
+                    className={classes.formSelect}
+                    value={formData.rly}
+                    onChange={(e) => setFormData({ ...formData, rly: e.target.value })}
                   >
-                    {formConfig ? (
-                      editingAsset.asset_category === 'WAGON' ? formConfig.wagonTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
-                      editingAsset.asset_category === 'LOCO' ? formConfig.locoTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
-                      editingAsset.asset_category === 'CRANE' ? formConfig.craneTypes.map((t: string) => <option key={t} value={t}>{t}</option>) :
-                      <option value="DETC">DETC</option>
-                    ) : (
-                      <option value={editingAsset.asset_type}>{editingAsset.asset_type}</option>
-                    )}
+                    {['ER', 'CR', 'NR', 'NER', 'NFR', 'SR', 'SCR', 'SER', 'WR', 'NCR', 'SWR', 'SECR', 'WCR', 'NWR', 'ECoR', 'ECR', 'CONCOR', 'MOD'].map((rly) => (
+                      <option key={rly} value={rly}>{rly} — {rly === 'ER' ? 'Eastern Railway (Jamalpur Home)' : `${rly} Zone`}</option>
+                    ))}
                   </select>
                 </div>
-                <div className={classes.inputGroup}>
-                  <label>Wagon Sr. (Sl No.)</label>
-                  <input type="text" className={classes.input} value={editingAsset.wagon_sr || ''} onChange={(e) => setEditingAsset({...editingAsset, wagon_sr: e.target.value})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Railway Zone (Rly)</label>
-                  <input type="text" className={classes.input} value={editingAsset.rly || ''} onChange={(e) => setEditingAsset({...editingAsset, rly: e.target.value})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Modification (Mod)</label>
-                  <input type="text" className={classes.input} value={editingAsset.mod || ''} onChange={(e) => setEditingAsset({...editingAsset, mod: e.target.value})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Built Year</label>
-                  <input type="number" className={classes.input} value={editingAsset.built_year || ''} onChange={(e) => setEditingAsset({...editingAsset, built_year: parseInt(e.target.value)})} />
-                </div>
-                <div className={classes.inputGroup}>
-                  <label>Action</label>
-                  <select 
-                    className={classes.input} 
-                    value={editingAsset.action} 
-                    onChange={(e) => setEditingAsset({...editingAsset, action: e.target.value})}
-                  >
-                    {formConfig ? formConfig.actions.map((act: string) => (
-                      <option key={act} value={act}>{act}</option>
-                    )) : (
-                      <option value="POH">POH</option>
-                    )}
-                  </select>
-                </div>
-                {isAdmin && (
-                  <>
-                    <div className={classes.inputGroup} style={{ gridColumn: 'span 2' }}>
-                      <h4 style={{ color: '#ef4444', marginBottom: '8px', borderBottom: '1px solid #fee2e2', paddingBottom: '4px' }}>🛡️ Admin God Mode (Force Overrides)</h4>
-                    </div>
-                    <div className={classes.inputGroup}>
-                      <label>Force Status Override</label>
-                      <input type="text" className={classes.input} value={editingAsset.current_status || ''} onChange={(e) => setEditingAsset({...editingAsset, current_status: e.target.value})} style={{ borderColor: '#ef4444' }} />
-                    </div>
-                    <div className={classes.inputGroup}>
-                      <label>Force Location Override</label>
-                      <input type="text" className={classes.input} value={editingAsset.current_location || ''} onChange={(e) => setEditingAsset({...editingAsset, current_location: e.target.value})} style={{ borderColor: '#ef4444' }} />
-                    </div>
-                  </>
-                )}
-                {formConfig && formConfig.customFields && formConfig.customFields.map((field: any) => {
-                  const cf = editingAsset.custom_fields || {};
-                  return (
-                    <div className={classes.inputGroup} key={field.key}>
-                      <label>{field.label}</label>
-                      <input 
-                        type={field.type === 'number' ? 'number' : 'text'} 
-                        className={classes.input} 
-                        value={cf[field.key] || ''} 
-                        onChange={(e) => setEditingAsset({
-                          ...editingAsset, 
-                          custom_fields: { ...cf, [field.key]: e.target.value }
-                        })} 
-                      />
-                    </div>
-                  );
-                })}
               </div>
-              <button type="submit" className={classes.saveBtn} disabled={saving} style={{ marginTop: '16px' }}>
-                {saving ? 'Saving...' : 'Save Changes'}
+
+              {/* Form Row 3: Wagon Sr & Modification */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Serial Number (RS Sr):</label>
+                  <input
+                    type="text"
+                    className={classes.formInput}
+                    placeholder="e.g. 45128"
+                    value={formData.wagon_sr}
+                    onChange={(e) => setFormData({ ...formData, wagon_sr: e.target.value })}
+                  />
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Modification (Mod):</label>
+                  <input
+                    type="text"
+                    className={classes.formInput}
+                    placeholder="e.g. Twin Pipe Air Brake, BMBS"
+                    value={formData.mod}
+                    onChange={(e) => setFormData({ ...formData, mod: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Form Row 4: Built Year & Overhaul Action */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Built Year:</label>
+                  <input
+                    type="number"
+                    className={classes.formInput}
+                    value={formData.built_year}
+                    onChange={(e) => setFormData({ ...formData, built_year: Number(e.target.value) })}
+                  />
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Overhaul Action:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={formData.action}
+                    onChange={(e) => setFormData({ ...formData, action: e.target.value })}
+                  >
+                    <option value="POH">POH (Periodic Overhaul)</option>
+                    <option value="ROH">ROH (Routine Overhaul)</option>
+                    <option value="IOH">IOH (Intermediate Overhaul)</option>
+                    <option value="SPECIAL_REPAIR">SPECIAL_REPAIR (Special Repairs)</option>
+                    <option value="NEW_BUILD">NEW_BUILD (New Manufacturing Order)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Form Row 5: Lifecycle Origin & Initial Location */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Lifecycle Mode:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={formData.origin}
+                    onChange={(e) => setFormData({ ...formData, origin: e.target.value })}
+                  >
+                    <option value="REPAIR">Repair Overhaul (POH/IOH/ROH)</option>
+                    <option value="MANUFACTURING">New Build Manufacturing (GIF/Crane)</option>
+                  </select>
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Initial Workshop Location:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={formData.current_location}
+                    onChange={(e) => setFormData({ ...formData, current_location: e.target.value })}
+                  >
+                    <option value="NSY">NSY (New Sorting Yard Staging)</option>
+                    <option value="DPS">DPS (Diesel POH Shed)</option>
+                    <option value="GIF">GIF (General Iron Foundry / Mfg)</option>
+                    <option value="CRANE_SHOP">CRANE_SHOP (Crane Overhaul / Mfg)</option>
+                    {locations.filter((l) => ['SHOP', 'SHED'].includes(l.location_type)).map((loc) => (
+                      <option key={loc.location_id} value={loc.location_id}>
+                        {loc.name} ({loc.location_id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className={classes.modalFooter}>
+              <button className={classes.cancelBtn} onClick={() => setIsRegisterOpen(false)}>
+                Cancel
               </button>
-            </form>
+              <button
+                className={classes.submitBtn}
+                onClick={handleRegister}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Registering...' : 'Register Rolling Stock'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Timeline Modal */}
-      {isTimelineOpen && (
-        <div className={classes.modalOverlay} onClick={() => setIsTimelineOpen(false)}>
-          <div className={classes.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+      {/* ================= MODAL 6: COMPREHENSIVE EDIT ASSET MODAL ================= */}
+      {isEditOpen && editingAsset && (
+        <div className={classes.modalOverlay} onClick={() => setIsEditOpen(false)}>
+          <div className={`${classes.modal} ${classes.modalWide}`} onClick={(e) => e.stopPropagation()}>
             <div className={classes.modalHeader}>
-              <h3>Asset Timeline</h3>
-              <button className={classes.closeBtn} onClick={() => setIsTimelineOpen(false)}><FiX /></button>
+              <h3>
+                <FiEdit2 color="#4338CA" /> Edit Rolling Stock Asset: #{editingAsset.asset_number}
+              </h3>
+              <button className={classes.closeBtn} onClick={() => setIsEditOpen(false)}>
+                <FiX />
+              </button>
             </div>
-            <div className={classes.modalContent}>
-              {timelineLoading ? (
-                <div className={classes.emptyState}>Loading timeline data...</div>
-              ) : !timelineAsset ? (
-                <div className={classes.emptyState}>Failed to load timeline.</div>
-              ) : (
-                <>
-                  <div style={{ padding: '16px', backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '8px' }}>{timelineAsset.asset_number}</div>
-                    <div style={{ display: 'flex', gap: '16px', fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-                      <span><strong>Type:</strong> {timelineAsset.asset_type}</span>
-                      <span><strong>Origin:</strong> {timelineAsset.origin}</span>
-                      <span><strong>Status:</strong> {timelineAsset.current_status}</span>
-                    </div>
-                  </div>
 
-                  <div className={classes.timelineContainer}>
-                    {(!timelineAsset.repair_cycles || timelineAsset.repair_cycles.length === 0) ? (
-                      <div className={classes.emptyState} style={{ padding: 0 }}>No repair cycles found.</div>
-                    ) : (
-                      timelineAsset.repair_cycles.map((cycle) => (
-                        <Fragment key={cycle.id}>
-                          <div className={classes.timelineCycleHeader}>
-                            <div className={classes.timelineCycleDot} />
-                            <h4 style={{ margin: 0, color: 'var(--color-primary-action)' }}>Repair Visit #{cycle.cycle_number}</h4>
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                              {cycle.tat_days !== null && (
-                                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-secondary)', backgroundColor: '#E5E7EB', padding: '4px 12px', borderRadius: '12px' }}>
-                                  Actual TAT: {cycle.tat_days} Days
-                                </span>
-                              )}
-                              {cycle.estimated_tat_days !== null && (
-                                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#92400e', backgroundColor: '#fef3c7', padding: '4px 12px', borderRadius: '12px' }}>
-                                  Est. TAT: {cycle.estimated_tat_days} Days
-                                </span>
-                              )}
-                            </div>
-                            {cycle.extended_tat_reason && (
-                              <div style={{ fontSize: '0.85rem', color: '#b91c1c', marginTop: '4px', fontStyle: 'italic' }}>
-                                Reason: "{cycle.extended_tat_reason}"
-                              </div>
-                            )}
-                          </div>
-                          
-                          {(!cycle.movement_logs || cycle.movement_logs.length === 0) ? (
-                            <div className={classes.emptyState} style={{ padding: '8px 0', fontSize: '0.85rem' }}>No movement logs for this cycle.</div>
-                          ) : (
-                            cycle.movement_logs.map((log) => (
-                              <div key={log.log_id} className={classes.timelineNode}>
-                                <div className={classes.timelineDot} />
-                                <div className={classes.timelineHeader}>
-                                  <span className={classes.timelineTitle}>
-                                    {log.new_status}
-                                  </span>
-                                  <span className={classes.timelineTime}>
-                                    {new Date(log.timestamp).toLocaleString()}
-                                  </span>
-                                </div>
-                                
-                                <div className={classes.timelineSubtitle}>
-                                  {log.from_location && log.from_location !== log.to_location 
-                                    ? `${log.from_location} ➔ ${log.to_location}` 
-                                    : `Location: ${log.to_location}`}
-                                </div>
-                                
-                                <div className={classes.timelineSubtitle}>
-                                  Handled by: <strong>{log.handler?.full_name || 'System'}</strong>
-                                </div>
+            <div className={classes.modalBody}>
+              {/* Asset Identity Banner */}
+              <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Asset Identifier</div>
+                  <div style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>#{editingAsset.asset_number}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <span style={{ padding: '4px 10px', backgroundColor: '#EEF2FF', color: '#4338CA', borderRadius: '6px', fontSize: '12px', fontWeight: 700 }}>
+                    {editingAsset.asset_category}
+                  </span>
+                  <span style={{ padding: '4px 10px', backgroundColor: '#F1F5F9', color: '#334155', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>
+                    {editingAsset.origin === 'MANUFACTURING' ? '🏗️ Manufacturing' : '🔧 Repair Lifecycle'}
+                  </span>
+                </div>
+              </div>
 
-                                {log.remarks && (
-                                  <div className={classes.timelineRemarks}>
-                                    "{log.remarks}"
-                                  </div>
-                                )}
+              {/* Form Row 1: Category & Type */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Fleet Category:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={editingAsset.asset_category}
+                    onChange={(e) => setEditingAsset({ ...editingAsset, asset_category: e.target.value })}
+                  >
+                    <option value="WAGON">WAGON (Freight Wagon)</option>
+                    <option value="LOCO">LOCO (Locomotive)</option>
+                    <option value="CRANE">CRANE (Breakdown Crane)</option>
+                    <option value="TOWER_CAR">TOWER_CAR (OHE Tower Car)</option>
+                  </select>
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Subtype / Classification:</label>
+                  <input
+                    type="text"
+                    className={classes.formInput}
+                    value={editingAsset.asset_type || ''}
+                    placeholder="e.g. BOXNHL, BTPN, WAG-9, 140T"
+                    onChange={(e) => setEditingAsset({ ...editingAsset, asset_type: e.target.value })}
+                  />
+                </div>
+              </div>
 
-                                {log.photos && log.photos.length > 0 && (
-                                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-                                    {log.photos.map((p, idx) => (
-                                      <img 
-                                        key={idx} 
-                                        src={p.photo_url} 
-                                        alt="Proof" 
-                                        style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }} 
-                                        onClick={() => {
-                                          setLightboxImages(log.photos || null);
-                                          setLightboxIndex(idx);
-                                        }}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )}
-                        </Fragment>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+              {/* Form Row 2: Railway Zone & Wagon Sr */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Railway Zone (Rly):</label>
+                  <select
+                    className={classes.formSelect}
+                    value={editingAsset.rly || 'ER'}
+                    onChange={(e) => setEditingAsset({ ...editingAsset, rly: e.target.value })}
+                  >
+                    {['ER', 'CR', 'NR', 'NER', 'NFR', 'SR', 'SCR', 'SER', 'WR', 'NCR', 'SWR', 'SECR', 'WCR', 'NWR', 'ECoR', 'ECR', 'CONCOR', 'MOD'].map((rly) => (
+                      <option key={rly} value={rly}>{rly} — {rly === 'ER' ? 'Eastern Railway (Home)' : `${rly} Zone`}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Fleet Serial No (RS Sr):</label>
+                  <input
+                    type="text"
+                    className={classes.formInput}
+                    value={editingAsset.wagon_sr || ''}
+                    placeholder="e.g. 45128"
+                    onChange={(e) => setEditingAsset({ ...editingAsset, wagon_sr: e.target.value })}
+                  />
+                </div>
+              </div>
 
-      {/* Lightbox Modal */}
-      {lightboxImages && (
-        <div className={classes.modalOverlay} style={{ zIndex: 2000, backgroundColor: 'rgba(0,0,0,0.9)' }} onClick={() => setLightboxImages(null)}>
-          <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-            <button 
-              onClick={() => setLightboxImages(null)}
-              style={{ position: 'absolute', top: '24px', right: '24px', background: 'none', border: 'none', color: '#fff', fontSize: '32px', cursor: 'pointer' }}
-            ><FiX /></button>
-            
-            {lightboxImages.length > 1 && (
-              <button 
-                onClick={() => setLightboxIndex((prev) => (prev > 0 ? prev - 1 : lightboxImages.length - 1))}
-                style={{ position: 'absolute', left: '24px', background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', color: '#fff', fontSize: '32px', padding: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              ><FiChevronLeft /></button>
-            )}
+              {/* Form Row 3: Modification & Built Year */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Modification Status (Mod):</label>
+                  <input
+                    type="text"
+                    className={classes.formInput}
+                    value={editingAsset.mod || ''}
+                    placeholder="e.g. Twin Pipe Air Brake, BMBS Fitted"
+                    onChange={(e) => setEditingAsset({ ...editingAsset, mod: e.target.value })}
+                  />
+                </div>
+                <div className={classes.formGroup}>
+                  <label>
+                    Built Year {editingAsset.built_year ? `(${new Date().getFullYear() - Number(editingAsset.built_year)} yrs old)` : ''}:
+                  </label>
+                  <input
+                    type="number"
+                    className={classes.formInput}
+                    value={editingAsset.built_year || ''}
+                    placeholder="e.g. 2019"
+                    onChange={(e) => setEditingAsset({ ...editingAsset, built_year: parseInt(e.target.value) || undefined })}
+                  />
+                </div>
+              </div>
 
-            <img 
-              src={lightboxImages[lightboxIndex].photo_url} 
-              alt="Fullscreen Proof" 
-              style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px' }} 
-            />
+              {/* Form Row 4: Action & Pipeline Mode */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Overhaul Action Cycle:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={editingAsset.action || 'POH'}
+                    onChange={(e) => setEditingAsset({ ...editingAsset, action: e.target.value })}
+                  >
+                    <option value="POH">POH (Periodic Overhaul)</option>
+                    <option value="ROH">ROH (Routine Overhaul)</option>
+                    <option value="IOH">IOH (Intermediate Overhaul)</option>
+                    <option value="SPECIAL_REPAIR">SPECIAL_REPAIR (Heavy Structural / Accident)</option>
+                    <option value="NEW_BUILD">NEW_BUILD (New Manufacturing Commissioning)</option>
+                    <option value="COMMISSIONING">COMMISSIONING (Final Testing)</option>
+                  </select>
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Lifecycle Origin Mode:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={editingAsset.origin || 'REPAIR'}
+                    onChange={(e) => setEditingAsset({ ...editingAsset, origin: e.target.value })}
+                  >
+                    <option value="REPAIR">Repair Overhaul (POH/IOH/ROH)</option>
+                    <option value="MANUFACTURING">New Build Manufacturing (GIF/Crane)</option>
+                  </select>
+                </div>
+              </div>
 
-            {lightboxImages.length > 1 && (
-              <button 
-                onClick={() => setLightboxIndex((prev) => (prev < lightboxImages.length - 1 ? prev + 1 : 0))}
-                style={{ position: 'absolute', right: '24px', background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', color: '#fff', fontSize: '32px', padding: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              ><FiChevronRight /></button>
-            )}
+              {/* Form Row 5: Location & Status */}
+              <div className={classes.formRow}>
+                <div className={classes.formGroup}>
+                  <label>Current Location (68 Topology Nodes):</label>
+                  <select
+                    className={classes.formSelect}
+                    value={editingAsset.current_location || ''}
+                    onChange={(e) => setEditingAsset({ ...editingAsset, current_location: e.target.value })}
+                  >
+                    <optgroup label="Shops & Production Sheds">
+                      {locations.filter((l) => ['SHOP', 'SHED'].includes(l.location_type)).map((loc) => (
+                        <option key={loc.location_id} value={loc.location_id}>
+                          {loc.name} ({loc.location_id})
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Track Lines & Yards">
+                      {locations.filter((l) => !['SHOP', 'SHED'].includes(l.location_type)).map((loc) => (
+                        <option key={loc.location_id} value={loc.location_id}>
+                          {loc.name} ({loc.location_id})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+                <div className={classes.formGroup}>
+                  <label>Current Status:</label>
+                  <select
+                    className={classes.formSelect}
+                    value={editingAsset.current_status}
+                    onChange={(e) => setEditingAsset({ ...editingAsset, current_status: e.target.value })}
+                  >
+                    <option value="IN_REPAIR">IN_REPAIR (Work In Progress)</option>
+                    <option value="SHOP_IN">SHOP_IN (Admitted in Bay)</option>
+                    <option value="RECEIVED_NSY">RECEIVED_NSY (Inward Yard Staged)</option>
+                    <option value="ON_HOLD">ON_HOLD (Overhaul Paused)</option>
+                    <option value="PENDING_QA">PENDING_QA (Awaiting QA / Testing)</option>
+                    <option value="FIT">FIT (QA Certified)</option>
+                    <option value="DISPATCHED">DISPATCHED (Outturn Outbound)</option>
+                    <option value="MISSING">MISSING (Asset Missing)</option>
+                    <option value="CONDEMNED">CONDEMNED (Flagged for Scrap)</option>
+                  </select>
+                </div>
+              </div>
 
-            <div style={{ position: 'absolute', bottom: '24px', color: '#fff', fontSize: '16px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '16px' }}>
-              {lightboxIndex + 1} / {lightboxImages.length}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Admin God Mode Modal */}
-      {isAdminModalOpen && (
-        <div className={classes.modalOverlay} onClick={() => setIsAdminModalOpen(false)}>
-          <div className={classes.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px' }}>
-            <div className={classes.modalHeader}>
-              <h3 style={{ color: '#ef4444' }}><FiAlertTriangle /> Resolve Critical Exceptions</h3>
-              <button className={classes.closeBtn} onClick={() => setIsAdminModalOpen(false)}><FiX /></button>
-            </div>
-            <div className={classes.modalContent}>
-              <p>The following assets require manual override by an Administrator.</p>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
-                {assets.filter(a => ['Missing', 'Condemned', 'Hold'].includes(a.current_status)).map(asset => (
-                  <div key={asset.asset_number} style={{ border: '1px solid var(--color-border)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-bg)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <h4 style={{ margin: '0 0 4px 0' }}>{asset.asset_number}</h4>
-                        <span style={{ fontSize: '0.85rem', color: asset.current_status === 'Missing' ? '#ef4444' : '#f59e0b', fontWeight: 600, padding: '4px 8px', backgroundColor: asset.current_status === 'Missing' ? '#fee2e2' : '#fef3c7', borderRadius: '4px' }}>
-                          {asset.current_status}
-                        </span>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
-                          Last Known Location: {asset.allocated_shop || asset.current_location || 'Unknown'}
-                        </div>
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        {asset.current_status === 'Missing' && (
-                          <>
-                            <button 
-                              className={classes.primaryBtn} 
-                              onClick={() => { setAdminActionAsset(asset); setAdminActionType('Re-route'); }}
-                            >
-                              Force Re-Route
-                            </button>
-                            <button 
-                              style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
-                              onClick={() => { setAdminActionAsset(asset); setAdminActionType('Mark Found'); }}
-                            >
-                              Mark Found (Shop In)
-                            </button>
-                          </>
-                        )}
-                        {asset.current_status === 'Condemned' && (
-                          <button 
-                            style={{ backgroundColor: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
-                            onClick={() => { setAdminActionAsset(asset); setAdminActionType('Scrap'); }}
-                          >
-                            Approve Condemnation
-                          </button>
-                        )}
-                        {asset.current_status === 'Hold' && (
-                          <button 
-                            style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
-                            onClick={() => { setAdminActionAsset(asset); setAdminActionType('Release Hold'); }}
-                          >
-                            Release Hold
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Action form drops down if selected */}
-                    {adminActionAsset?.asset_number === asset.asset_number && (
-                      <div style={{ marginTop: '16px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        <h5 style={{ margin: '0 0 12px 0' }}>Action: {adminActionType}</h5>
-                        
-                        {adminActionType === 'Re-route' && (
-                          <div style={{ marginBottom: '16px' }}>
-                            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-text-secondary)' }}>Select Destination Shop</label>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                              {locations.map(loc => (
-                                <button 
-                                  key={loc.location_id}
-                                  onClick={() => setAdminTargetShop(loc.location_id)}
-                                  style={{
-                                    padding: '8px 16px',
-                                    backgroundColor: adminTargetShop === loc.location_id ? '#0f172a' : '#fff',
-                                    color: adminTargetShop === loc.location_id ? '#fff' : '#0f172a',
-                                    border: '1px solid #cbd5e1',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  {loc.location_id}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button 
-                            style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
-                            onClick={async () => {
-                              try {
-                                setSaving(true);
-                                let payload = {
-                                  asset_number: asset.asset_number,
-                                  new_status: '',
-                                  to_location: undefined as string | undefined,
-                                  remarks: ''
-                                };
-                                
-                                if (adminActionType === 'Re-route') {
-                                  payload.new_status = 'Allocated';
-                                  payload.to_location = adminTargetShop;
-                                  payload.remarks = 'Admin Force Re-Routed to ' + adminTargetShop;
-                                } else if (adminActionType === 'Mark Found') {
-                                  payload.new_status = 'Shop In';
-                                  payload.remarks = 'Admin Marked Found in Shop';
-                                } else if (adminActionType === 'Scrap') {
-                                  payload.new_status = 'Scrapped';
-                                  payload.to_location = 'Scrapped';
-                                  payload.remarks = 'Admin Approved Condemnation (Scrapped)';
-                                } else if (adminActionType === 'Release Hold') {
-                                  payload.new_status = 'Shop In';
-                                  payload.remarks = 'Admin Released Hold';
-                                }
-
-                                await api.post('/movement', payload);
-                                toast.success('Success', 'Admin action completed for ' + asset.asset_number);
-                                setAdminActionAsset(null);
-                                fetchAssets(page);
-                              } catch (err: any) {
-                                toast.error('Action Failed', err);
-                              } finally {
-                                setSaving(false);
-                              }
-                            }}
-                            disabled={saving}
-                          >
-                            {saving ? 'Processing...' : 'Confirm Action'}
-                          </button>
-                          <button 
-                            className={classes.actionBtn}
-                            onClick={() => setAdminActionAsset(null)}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                
-                {assets.filter(a => ['Missing', 'Condemned', 'Hold'].includes(a.current_status)).length === 0 && (
-                  <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
-                    No critical exceptions found. System is healthy.
-                  </div>
-                )}
+              {/* Form Row 6: Active Fleet Status */}
+              <div className={classes.formGroup}>
+                <label>Active Fleet Status:</label>
+                <select
+                  className={classes.formSelect}
+                  value={editingAsset.is_active ? 'active' : 'inactive'}
+                  onChange={(e) => setEditingAsset({ ...editingAsset, is_active: e.target.value === 'active' })}
+                >
+                  <option value="active">Active (Enrolled in Live Workshop Fleet)</option>
+                  <option value="inactive">Inactive / Deactivated</option>
+                </select>
               </div>
             </div>
+
+            <div className={classes.modalFooter}>
+              <button className={classes.cancelBtn} onClick={() => setIsEditOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className={classes.submitBtn}
+                style={{ backgroundColor: '#4338CA', borderColor: '#4338CA' }}
+                onClick={handleSaveEdit}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Saving Changes...' : 'Save Asset Changes'}
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {/* ================= QUICK ACTION MODALS ================= */}
+      <YardIntakeModal
+        isOpen={isYardIntakeOpen}
+        onClose={() => setIsYardIntakeOpen(false)}
+        onSuccess={() => {
+          setIsYardIntakeOpen(false);
+          fetchAssets();
+        }}
+      />
+      <ManufacturingOrderModal
+        isOpen={isMfgOrderOpen}
+        onClose={() => setIsMfgOrderOpen(false)}
+        onSuccess={() => {
+          setIsMfgOrderOpen(false);
+          fetchAssets();
+        }}
+      />
+      <ReportExceptionModal
+        isOpen={isGlobalExceptionOpen}
+        onClose={() => setIsGlobalExceptionOpen(false)}
+        onSuccess={() => {
+          setIsGlobalExceptionOpen(false);
+          fetchAssets();
+        }}
+      />
     </div>
   );
 }
