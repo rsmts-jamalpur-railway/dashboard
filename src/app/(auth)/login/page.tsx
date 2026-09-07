@@ -82,7 +82,7 @@ export default function LoginPage() {
         <div className={classes.header}>
           <h1 className={classes.title}>Sign in</h1>
           <p className={classes.subtitle}>Enter your details to access your account.</p>
-          
+
           {/* Quick-fill credential chips */}
           <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
             <button
@@ -123,7 +123,7 @@ export default function LoginPage() {
                 cursor: 'pointer',
               }}
             >
-              ⚡ Quick Fill: Farhan Aiyyar
+              ⚡ Quick Fill: Md Farhan
             </button>
           </div>
         </div>
@@ -160,14 +160,14 @@ export default function LoginPage() {
           {/* Security Check (CAPTCHA) */}
           <div className={classes.fieldGroup}>
             <label className={classes.label}>Security Check</label>
-            
+
             <div className={classes.captchaRow}>
               {/* Distorted CAPTCHA Box */}
               <div className={classes.captchaBox}>
                 <svg width="100%" height="70" viewBox="0 0 240 70" className={classes.captchaSvg}>
                   {/* Subtle Background Mesh / Noise */}
                   <rect width="240" height="70" fill="#EEF2F6" rx="4" />
-                  
+
                   {/* Distorting Lines matching screenshot */}
                   <line x1="10" y1="60" x2="230" y2="15" stroke="#CBD5E1" strokeWidth="2.5" />
                   <line x1="15" y1="15" x2="225" y2="55" stroke="#CBD5E1" strokeWidth="2.5" />
