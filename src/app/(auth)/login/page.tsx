@@ -15,7 +15,7 @@ const generateCaptchaCode = () => {
 };
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('farhanaiyyar04@gmail.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [captchaCode, setCaptchaCode] = useState('');
   const [enteredCaptcha, setEnteredCaptcha] = useState('');
@@ -83,49 +83,6 @@ export default function LoginPage() {
           <h1 className={classes.title}>Sign in</h1>
           <p className={classes.subtitle}>Enter your details to access your account.</p>
 
-          {/* Quick-fill credential chips */}
-          <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setEmail('admin@rsmts.gov.in');
-                setPassword('Admin@123!');
-                setEnteredCaptcha(captchaCode);
-              }}
-              style={{
-                padding: '4px 10px',
-                fontSize: '11px',
-                fontWeight: 600,
-                backgroundColor: '#EFF6FF',
-                color: '#1D4ED8',
-                border: '1px solid #BFDBFE',
-                borderRadius: '6px',
-                cursor: 'pointer',
-              }}
-            >
-              ⚡ Quick Fill: Admin
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEmail('farhanaiyyar04@gmail.com');
-                setPassword('Admin@123!');
-                setEnteredCaptcha(captchaCode);
-              }}
-              style={{
-                padding: '4px 10px',
-                fontSize: '11px',
-                fontWeight: 600,
-                backgroundColor: '#F0FDF4',
-                color: '#15803D',
-                border: '1px solid #BBF7D0',
-                borderRadius: '6px',
-                cursor: 'pointer',
-              }}
-            >
-              ⚡ Quick Fill: Md Farhan
-            </button>
-          </div>
         </div>
 
         {error && <div className={classes.errorBanner}>{error}</div>}
@@ -138,7 +95,7 @@ export default function LoginPage() {
               type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. farhanaiyyar04@gmail.com or ADM-001"
+              placeholder="e.g. admin@rsmts.gov.in or EMP-001"
               required
               className={classes.inputTinted}
             />
