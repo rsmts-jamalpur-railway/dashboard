@@ -81,7 +81,7 @@ export default function AssetsPage() {
   const initialSearch = searchParams.get('search') || '';
   
   const { user } = useContext(AuthContext);
-  const isAdmin = (user?.role as any)?.role_name === 'Administrator' || user?.role === 'Administrator';
+  const isAdmin = user?.roles?.some(r => ['ADMIN', 'SYSTEM_ADMIN'].includes(r)) || ['ADMIN', 'SYSTEM_ADMIN'].includes(user?.role as string);
   const toast = useToast();
 
   // Search & Filters State
