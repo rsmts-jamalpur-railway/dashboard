@@ -1,12 +1,13 @@
 'use client';
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useContext } from 'react';
 import { 
   FiX, FiClock, FiMapPin, FiCheckCircle, FiAlertTriangle, 
   FiChevronDown, FiChevronUp, FiCamera, FiExternalLink, FiShare2, FiCheck, FiInfo,
-  FiTruck, FiPause, FiPlay, FiAlertOctagon
+  FiTruck, FiPause, FiPlay, FiAlertOctagon, FiTrash2
 } from 'react-icons/fi';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
+import { AuthContext } from '@/contexts/AuthContext';
 import { decodeWagonNumber, detectAssetCategory, calculateIndianRailwaysCheckDigit } from '@/lib/assetValidation';
 
 interface AssetDetailModalProps {
@@ -20,6 +21,9 @@ export default function AssetDetailModal({
   onClose,
   onAssetUpdated,
 }: AssetDetailModalProps) {
+  const { user } = useContext(AuthContext);
+  const isAdmin = user?.roles?.some((r: string) => ['ADMIN', 'SYSTEM_ADMIN'].includes(r)) || ['ADMIN', 'SYSTEM_ADMIN'].includes(user?.role as string);
+
   const [asset, setAsset] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [activePhoto, setActivePhoto] = useState<string | null>(null);
@@ -478,6 +482,23 @@ export default function AssetDetailModal({
       if (onAssetUpdated) onAssetUpdated();
     } catch (err: any) {
       toast.error('Reporting Failed', err.response?.data?.message || err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleHardDelete = async () => {
+    if (!isAdmin) return;
+    if (!confirm(`[GOD MODE WARNING] Permanently delete asset #${assetNumber} and all its audit history?`)) return;
+    
+    try {
+      setActionLoading(true);
+      await api.delete(`/assets/${assetNumber}?hard=true`);
+      toast.success('Asset Purged', `Asset #${assetNumber} was permanently deleted.`);
+      if (onAssetUpdated) onAssetUpdated();
+      onClose();
+    } catch (err: any) {
+      toast.error('Deletion Failed', err.response?.data?.message || err.message);
     } finally {
       setActionLoading(false);
     }
@@ -1147,6 +1168,24 @@ export default function AssetDetailModal({
             >
               <FiAlertOctagon size={13} /> Flag Discrepancy
             </button>
+
+            {/* God Mode Delete */}
+            {isAdmin && (
+              <button
+                onClick={handleHardDelete}
+                disabled={actionLoading}
+                style={{
+                  ...adminBtnStyle,
+                  backgroundColor: '#FEF2F2',
+                  color: '#DC2626',
+                  borderColor: '#FCA5A5',
+                  marginLeft: '8px',
+                }}
+                title="Permanently Purge Asset (God Mode)"
+              >
+                <FiTrash2 size={13} /> Purge Asset
+              </button>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
