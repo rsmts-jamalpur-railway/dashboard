@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useState, useMemo, useCallback, Suspense } from 'react';
+import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import useSWR, { mutate } from 'swr';
 import { io, Socket } from 'socket.io-client';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
@@ -11,6 +12,8 @@ import {
 import classes from './page.module.css';
 
 import AssetCard, { FormattedAsset } from '@/components/dashboard/AssetCard';
+import AssetCardSkeleton from '@/components/dashboard/AssetCardSkeleton';
+import KpiCardSkeleton from '@/components/dashboard/KpiCardSkeleton';
 import AssetDetailModal from '@/components/dashboard/AssetDetailModal';
 import LocationSelector, { LocationItem } from '@/components/dashboard/LocationSelector';
 import { YardIntakeModal, ManufacturingOrderModal, ReportExceptionModal } from '@/components/dashboard/QuickActionModals';
@@ -28,13 +31,11 @@ interface OverviewStats {
   occupancy_by_location: Record<string, number>;
 }
 
+// SWR fetcher
+const fetcher = (url: string) => api.get(url).then(res => res.data?.data);
+
 function DashboardContent() {
   const searchParams = useSearchParams();
-  const [overview, setOverview] = useState<OverviewStats | null>(null);
-  const [assets, setAssets] = useState<FormattedAsset[]>([]);
-  const [locations, setLocations] = useState<LocationItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   // Active Pipeline & State Filter
   const [activePipeline, setActivePipeline] = useState<'REPAIR' | 'MANUFACTURING' | 'EXCEPTION' | 'MAP' | 'ALL'>('REPAIR');
@@ -56,6 +57,19 @@ function DashboardContent() {
     }
   }, [searchParams]);
 
+  // Compute Pipeline Query for server-side filtering
+  const pipelineQuery = `?pipeline=${activePipeline === 'MAP' ? 'ALL' : activePipeline}` 
+    + (selectedLocation !== 'ALL' ? `&shop_id=${encodeURIComponent(selectedLocation)}` : '')
+    + (searchQuery.trim() ? `&search=${encodeURIComponent(searchQuery.trim())}` : '');
+
+  // SWR Hooks
+  const { data: overview, isLoading: overviewLoading } = useSWR<OverviewStats>('/dashboard/overview', fetcher);
+  const { data: locations = [], isLoading: locLoading } = useSWR<LocationItem[]>('/dashboard/locations', fetcher);
+  const { data: rawAssets, isLoading: assetsLoading, isValidating: refreshing } = useSWR<FormattedAsset[]>(`/dashboard/pipeline${pipelineQuery}`, fetcher, { keepPreviousData: true });
+
+  const assets = rawAssets || [];
+  const loading = overviewLoading || locLoading || (!rawAssets && assetsLoading);
+
   // Modals
   const [selectedAssetNumber, setSelectedAssetNumber] = useState<string | null>(null);
   const [isYardIntakeOpen, setIsYardIntakeOpen] = useState(false);
@@ -64,40 +78,13 @@ function DashboardContent() {
 
   const toast = useToast();
 
-  // Fetch Dashboard Telemetry
-  const fetchData = useCallback(async (silent = false) => {
-    try {
-      if (!silent) setLoading(true);
-      else setRefreshing(true);
-
-      const [overviewRes, pipelineRes, locationsRes] = await Promise.all([
-        api.get('/dashboard/overview').catch(() => ({ data: { success: false, data: null } })),
-        api.get('/dashboard/pipeline').catch(() => ({ data: { success: false, data: [] } })),
-        api.get('/dashboard/locations').catch(() => ({ data: { success: false, data: [] } })),
-      ]);
-
-      if (overviewRes.data?.success) {
-        setOverview(overviewRes.data.data);
-      }
-
-      if (pipelineRes.data?.success) {
-        setAssets(pipelineRes.data.data || []);
-      }
-
-      if (locationsRes.data?.success) {
-        setLocations(locationsRes.data.data || []);
-      }
-    } catch (err: any) {
-      toast.error('Sync Error', 'Failed to refresh workshop telemetry');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [toast]);
+  const handleManualRefresh = () => {
+    mutate('/dashboard/overview');
+    mutate('/dashboard/locations');
+    mutate(`/dashboard/pipeline${pipelineQuery}`);
+  };
 
   useEffect(() => {
-    fetchData();
-
     // Setup WebSocket for Real-time Floor Pushes
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
     const socket: Socket = io(socketUrl, {
@@ -105,14 +92,23 @@ function DashboardContent() {
       reconnectionAttempts: Infinity,
     });
 
-    socket.on('movement_updated', () => fetchData(true));
-    socket.on('asset_updated', () => fetchData(true));
-    socket.on('sync_event', () => fetchData(true));
+    const refreshData = () => {
+      // Revalidate all pipeline queries, overview and locations on real-time event
+      mutate(
+        (key) => typeof key === 'string' && (key.startsWith('/dashboard/pipeline') || key === '/dashboard/overview' || key === '/dashboard/locations'),
+        undefined,
+        { revalidate: true }
+      );
+    };
+
+    socket.on('movement_updated', refreshData);
+    socket.on('asset_updated', refreshData);
+    socket.on('sync_event', refreshData);
 
     return () => {
       socket.disconnect();
     };
-  }, [fetchData]);
+  }, []);
 
   // Rolling Stock Category Distribution Counts
   const categoryCounts = useMemo(() => {
@@ -298,14 +294,6 @@ function DashboardContent() {
     return null;
   }, [searchQuery]);
 
-  if (loading && assets.length === 0) {
-    return (
-      <div style={{ padding: '32px', textAlign: 'center', color: '#64748B' }}>
-        <p style={{ fontSize: '15px', fontWeight: 600 }}>Loading Jamalpur Workshop Telemetry (68 Location Network)...</p>
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       
@@ -324,7 +312,7 @@ function DashboardContent() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
-            onClick={() => fetchData(true)}
+            onClick={handleManualRefresh}
             disabled={refreshing}
             style={headerSecondaryBtnStyle}
             title="Refresh Workshop Feed"
@@ -364,46 +352,52 @@ function DashboardContent() {
 
       {/* High-Level KPI Summary Grid */}
       <div className={classes.grid}>
-        <div className={classes.kpiCard}>
-          <div className={classes.kpiTitle}>Total Active Rolling Stock</div>
-          <div className={classes.kpiValue}>
-            {overview?.total_active_assets || assets.length}
-            <span style={{ fontSize: '11px', fontWeight: 400, marginLeft: '6px', color: '#6B7280' }}>
-              (Wagons: {categoryCounts.WAGON} | Locos: {categoryCounts.LOCO} | Cranes: {categoryCounts.CRANE})
-            </span>
-          </div>
-        </div>
+        {overviewLoading ? (
+          <KpiCardSkeleton />
+        ) : (
+          <>
+            <div className={classes.kpiCard}>
+              <div className={classes.kpiTitle}>Total Active Rolling Stock</div>
+              <div className={classes.kpiValue}>
+                {overview?.total_active_assets || assets.length}
+                <span style={{ fontSize: '11px', fontWeight: 400, marginLeft: '6px', color: '#6B7280' }}>
+                  (Wagons: {categoryCounts.WAGON} | Locos: {categoryCounts.LOCO} | Cranes: {categoryCounts.CRANE})
+                </span>
+              </div>
+            </div>
 
-        <div className={classes.kpiCard}>
-          <div className={classes.kpiTitle}><FiTool style={{ verticalAlign: 'middle', marginRight: '4px' }} /> In Repair Operations</div>
-          <div className={classes.kpiValue} style={{ color: '#0A74DA' }}>
-            {overview?.repair_active || 0}
-          </div>
-        </div>
+            <div className={classes.kpiCard}>
+              <div className={classes.kpiTitle}><FiTool style={{ verticalAlign: 'middle', marginRight: '4px' }} /> In Repair Operations</div>
+              <div className={classes.kpiValue} style={{ color: '#0A74DA' }}>
+                {overview?.repair_active || 0}
+              </div>
+            </div>
 
-        <div className={classes.kpiCard}>
-          <div className={classes.kpiTitle}><FiBox style={{ verticalAlign: 'middle', marginRight: '4px' }} /> In Manufacturing (GIF/Crane)</div>
-          <div className={classes.kpiValue} style={{ color: '#0284C7' }}>
-            {overview?.manufacturing_active || 0}
-          </div>
-        </div>
+            <div className={classes.kpiCard}>
+              <div className={classes.kpiTitle}><FiBox style={{ verticalAlign: 'middle', marginRight: '4px' }} /> In Manufacturing (GIF/Crane)</div>
+              <div className={classes.kpiValue} style={{ color: '#0284C7' }}>
+                {overview?.manufacturing_active || 0}
+              </div>
+            </div>
 
-        <div className={classes.kpiCard}>
-          <div className={classes.kpiTitle}><FiClock style={{ verticalAlign: 'middle', marginRight: '4px' }} /> On Hold (Material Delays)</div>
-          <div className={classes.kpiValue} style={{ color: '#D97706' }}>
-            {overview?.on_hold_count || 0}
-            <span style={{ fontSize: '11px', fontWeight: 400, marginLeft: '6px', color: '#6B7280' }}>
-              (TAT Paused)
-            </span>
-          </div>
-        </div>
+            <div className={classes.kpiCard}>
+              <div className={classes.kpiTitle}><FiClock style={{ verticalAlign: 'middle', marginRight: '4px' }} /> On Hold (Material Delays)</div>
+              <div className={classes.kpiValue} style={{ color: '#D97706' }}>
+                {overview?.on_hold_count || 0}
+                <span style={{ fontSize: '11px', fontWeight: 400, marginLeft: '6px', color: '#6B7280' }}>
+                  (TAT Paused)
+                </span>
+              </div>
+            </div>
 
-        <div className={classes.kpiCard}>
-          <div className={classes.kpiTitle}><FiActivity style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Dispatched Today</div>
-          <div className={classes.kpiValue} style={{ color: '#16A34A' }}>
-            {overview?.dispatched_today || 0}
-          </div>
-        </div>
+            <div className={classes.kpiCard}>
+              <div className={classes.kpiTitle}><FiActivity style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Dispatched Today</div>
+              <div className={classes.kpiValue} style={{ color: '#16A34A' }}>
+                {overview?.dispatched_today || 0}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Primary Pipeline Selector (Pill Tabs) */}
@@ -695,7 +689,15 @@ function DashboardContent() {
 
           {/* Cards Content Area (Replacing the old flat table) */}
           <div style={{ minHeight: '300px' }}>
-            {filteredAssets.length === 0 ? (
+            {assetsLoading ? (
+              // Show skeleton cards during data fetch
+              <>
+                <AssetCardSkeleton />
+                <AssetCardSkeleton />
+                <AssetCardSkeleton />
+                <AssetCardSkeleton />
+              </>
+            ) : filteredAssets.length === 0 ? (
               <div
                 style={{
                   backgroundColor: '#FFFFFF',
@@ -747,7 +749,7 @@ function DashboardContent() {
         <AssetDetailModal
           assetNumber={selectedAssetNumber}
           onClose={() => setSelectedAssetNumber(null)}
-          onAssetUpdated={() => fetchData(true)}
+          onAssetUpdated={handleManualRefresh}
         />
       )}
 
@@ -755,19 +757,19 @@ function DashboardContent() {
       <YardIntakeModal
         isOpen={isYardIntakeOpen}
         onClose={() => setIsYardIntakeOpen(false)}
-        onSuccess={() => fetchData(true)}
+        onSuccess={handleManualRefresh}
       />
 
       <ManufacturingOrderModal
         isOpen={isMfgOrderOpen}
         onClose={() => setIsMfgOrderOpen(false)}
-        onSuccess={() => fetchData(true)}
+        onSuccess={handleManualRefresh}
       />
 
       <ReportExceptionModal
         isOpen={isExceptionOpen}
         onClose={() => setIsExceptionOpen(false)}
-        onSuccess={() => fetchData(true)}
+        onSuccess={handleManualRefresh}
       />
     </div>
   );
