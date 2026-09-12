@@ -11,8 +11,11 @@ import {
 } from 'react-icons/fi';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { io, Socket } from 'socket.io-client';
+import useSWR, { mutate } from 'swr';
 import api from '@/lib/api';
 import { useToast } from '@/contexts/ToastContext';
+import KpiCardSkeleton from '@/components/dashboard/KpiCardSkeleton';
 import classes from './page.module.css';
 
 // Chart Colors
@@ -121,10 +124,42 @@ export default function AnalyticsPage() {
   const [selectedCategory, setSelectedCategory] = useState<'ALL' | 'WAGON' | 'LOCO' | 'CRANE' | 'TOWER_CAR'>('ALL');
   const [activeTab, setActiveTab] = useState<'OUTTURN' | 'TAT_VELOCITY' | 'BAY_MATRIX' | 'HOLDS_QA' | 'MOVEMENT_LEDGER'>('OUTTURN');
 
-  const [analytics, setAnalytics] = useState<WorkshopAnalyticsData | null>(null);
-  const [movementLogs, setMovementLogs] = useState<MovementLog[]>([]);
+  const analyticsUrl = `/reports/workshop-analytics?category=${selectedCategory}`;
+  const movementsUrl = `/reports/movements-data?startDate=${startDate}&endDate=${endDate}`;
+
+  const { data: analytics, isLoading: analyticsLoading, isValidating: analyticsValidating } = useSWR<WorkshopAnalyticsData>(
+    analyticsUrl,
+    (url: string) => api.get(url).then(res => {
+      const payload = res.data?.data?.hero_kpis
+        ? res.data.data
+        : res.data?.data?.data
+        ? res.data.data.data
+        : res.data?.data || res.data;
+      return payload;
+    }),
+    { keepPreviousData: true }
+  );
+
+  const { data: movementLogsData, isLoading: logsLoading, isValidating: logsValidating } = useSWR<MovementLog[]>(
+    movementsUrl,
+    (url: string) => api.get(url).then(res => {
+      const rawLogs = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.data)
+        ? res.data.data
+        : Array.isArray(res.data?.data?.data)
+        ? res.data.data.data
+        : [];
+      return rawLogs;
+    }),
+    { keepPreviousData: true }
+  );
+
+  const movementLogs = movementLogsData || [];
+  const loading = analyticsLoading || logsLoading;
+  const refreshing = analyticsValidating || logsValidating;
+
   const [ledgerSearch, setLedgerSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const toast = useToast();
@@ -133,42 +168,35 @@ export default function AnalyticsPage() {
     setIsMounted(true);
   }, []);
 
-  // Load telemetry & analytics data
-  const fetchAnalyticsData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [analyticsRes, movementsRes] = await Promise.all([
-        api.get(`/reports/workshop-analytics?category=${selectedCategory}`).catch(() => ({ data: { success: false, data: null } })),
-        api.get(`/reports/movements-data?startDate=${startDate}&endDate=${endDate}`).catch(() => ({ data: { success: false, data: [] } })),
-      ]);
-
-      if (analyticsRes.data?.success) {
-        // Unpack nested payload from TransformInterceptor or direct data
-        const payload = analyticsRes.data.data?.hero_kpis
-          ? analyticsRes.data.data
-          : analyticsRes.data.data?.data
-          ? analyticsRes.data.data.data
-          : analyticsRes.data?.data || analyticsRes.data;
-        setAnalytics(payload);
-      }
-      if (movementsRes.data?.success) {
-        const rawLogs = Array.isArray(movementsRes.data.data)
-          ? movementsRes.data.data
-          : Array.isArray(movementsRes.data.data?.data)
-          ? movementsRes.data.data.data
-          : [];
-        setMovementLogs(rawLogs);
-      }
-    } catch (err: any) {
-      toast.error('Analytics Error', err.response?.data?.message || 'Failed to fetch analytics telemetry');
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedCategory, startDate, endDate]);
+  const fetchAnalyticsData = useCallback(() => {
+    mutate(analyticsUrl);
+    mutate(movementsUrl);
+  }, [analyticsUrl, movementsUrl]);
 
   useEffect(() => {
-    fetchAnalyticsData();
-  }, [fetchAnalyticsData]);
+    // Setup WebSocket for Real-time Floor Pushes
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+    const socket: Socket = io(socketUrl, {
+      reconnectionDelay: 5000,
+      reconnectionAttempts: Infinity,
+    });
+
+    const refreshData = () => {
+      mutate(
+        (key) => typeof key === 'string' && key.startsWith('/reports/'),
+        undefined,
+        { revalidate: true }
+      );
+    };
+
+    socket.on('movement_updated', refreshData);
+    socket.on('asset_updated', refreshData);
+    socket.on('sync_event', refreshData);
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
   // Handle Preset Time Selection
   const handlePreset = (preset: '7D' | '30D' | 'MTD' | 'CUSTOM') => {
@@ -322,7 +350,7 @@ export default function AnalyticsPage() {
             className={classes.btnSecondary}
             title="Refresh analytics data"
           >
-            <FiRefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
+            <FiRefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Refresh
           </button>
           <button 
             type="button" 
@@ -408,113 +436,126 @@ export default function AnalyticsPage() {
       <div id="analytics-report-area" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         {/* 3. Hero KPI Grid (6 Metric Cards) */}
         <div className={classes.kpiGrid}>
-          {/* Card 1: Total Active Stock */}
-          <div className={`${classes.kpiCard} ${classes.kpiCardPrimary}`}>
-            <div className={classes.kpiHeader}>
-              <span className={classes.kpiTitle}>Active Rolling Stock</span>
-              <FiLayers size={14} color="#2563EB" />
-            </div>
-            <div className={classes.kpiValue}>
-              {kpis?.total_active_assets ?? 22}
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669' }}>+4.2% wk</span>
-            </div>
-            <div className={classes.kpiSubtext}>
-              {kpis?.wagons_count ?? 17} Wagons • {kpis?.locomotives_count ?? 2} Locos • {kpis?.cranes_count ?? 2} Cranes
-            </div>
-            <div className={classes.kpiProgress}>
-              <div className={classes.kpiProgressBar} style={{ width: '74%', backgroundColor: '#2563EB' }} />
-            </div>
-          </div>
+          {loading ? (
+            <>
+              <KpiCardSkeleton />
+              <KpiCardSkeleton />
+              <KpiCardSkeleton />
+              <KpiCardSkeleton />
+              <KpiCardSkeleton />
+              <KpiCardSkeleton />
+            </>
+          ) : (
+            <>
+              {/* Card 1: Total Active Stock */}
+              <div className={`${classes.kpiCard} ${classes.kpiCardPrimary}`}>
+                <div className={classes.kpiHeader}>
+                  <span className={classes.kpiTitle}>Active Rolling Stock</span>
+                  <FiLayers size={14} color="#2563EB" />
+                </div>
+                <div className={classes.kpiValue}>
+                  {kpis?.total_active_assets ?? 0}
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669' }}>+4.2% wk</span>
+                </div>
+                <div className={classes.kpiSubtext}>
+                  {kpis?.wagons_count ?? 0} Wagons • {kpis?.locomotives_count ?? 0} Locos • {kpis?.cranes_count ?? 0} Cranes
+                </div>
+                <div className={classes.kpiProgress}>
+                  <div className={classes.kpiProgressBar} style={{ width: '74%', backgroundColor: '#2563EB' }} />
+                </div>
+              </div>
 
-          {/* Card 2: Outturn Attainment */}
-          <div className={`${classes.kpiCard} ${classes.kpiCardSuccess}`}>
-            <div className={classes.kpiHeader}>
-              <span className={classes.kpiTitle}>Outturn Attainment</span>
-              <FiTrendingUp size={14} color="#16A34A" />
-            </div>
-            <div className={classes.kpiValue}>
-              {kpis?.monthly_target_attainment_pct ?? 98.6}%
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#16A34A' }}>On Target</span>
-            </div>
-            <div className={classes.kpiSubtext}>
-              Target: 125 Units/Mo • MTD Outturn: 42
-            </div>
-            <div className={classes.kpiProgress}>
-              <div className={classes.kpiProgressBar} style={{ width: '98%', backgroundColor: '#16A34A' }} />
-            </div>
-          </div>
+              {/* Card 2: Outturn Attainment */}
+              <div className={`${classes.kpiCard} ${classes.kpiCardSuccess}`}>
+                <div className={classes.kpiHeader}>
+                  <span className={classes.kpiTitle}>Outturn Attainment</span>
+                  <FiTrendingUp size={14} color="#16A34A" />
+                </div>
+                <div className={classes.kpiValue}>
+                  {kpis?.monthly_target_attainment_pct ?? 0}%
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#16A34A' }}>On Target</span>
+                </div>
+                <div className={classes.kpiSubtext}>
+                  Target: 125 Units/Mo • MTD Outturn: 42
+                </div>
+                <div className={classes.kpiProgress}>
+                  <div className={classes.kpiProgressBar} style={{ width: '98%', backgroundColor: '#16A34A' }} />
+                </div>
+              </div>
 
-          {/* Card 3: Avg Turn-Around Time */}
-          <div className={`${classes.kpiCard} ${classes.kpiCardCyan}`}>
-            <div className={classes.kpiHeader}>
-              <span className={classes.kpiTitle}>Average TAT</span>
-              <FiClock size={14} color="#0891B2" />
-            </div>
-            <div className={classes.kpiValue}>
-              {kpis?.avg_tat_hours ?? 88.6}h
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669' }}>-16.4h ahead</span>
-            </div>
-            <div className={classes.kpiSubtext}>
-              Std Benchmark: {kpis?.standard_tat_hours ?? 105.0}h (POH/ROH Blend)
-            </div>
-            <div className={classes.kpiProgress}>
-              <div className={classes.kpiProgressBar} style={{ width: '84%', backgroundColor: '#0891B2' }} />
-            </div>
-          </div>
+              {/* Card 3: Avg Turn-Around Time */}
+              <div className={`${classes.kpiCard} ${classes.kpiCardCyan}`}>
+                <div className={classes.kpiHeader}>
+                  <span className={classes.kpiTitle}>Average TAT</span>
+                  <FiClock size={14} color="#0891B2" />
+                </div>
+                <div className={classes.kpiValue}>
+                  {kpis?.avg_tat_hours ?? 0}h
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669' }}>-16.4h ahead</span>
+                </div>
+                <div className={classes.kpiSubtext}>
+                  Std Benchmark: {kpis?.standard_tat_hours ?? 0}h (POH/ROH Blend)
+                </div>
+                <div className={classes.kpiProgress}>
+                  <div className={classes.kpiProgressBar} style={{ width: '84%', backgroundColor: '#0891B2' }} />
+                </div>
+              </div>
 
-          {/* Card 4: Shop Bay Utilization */}
-          <div className={`${classes.kpiCard} ${classes.kpiCardPurple}`}>
-            <div className={classes.kpiHeader}>
-              <span className={classes.kpiTitle}>Shop Capacity</span>
-              <FiTool size={14} color="#9333EA" />
-            </div>
-            <div className={classes.kpiValue}>
-              {kpis?.overall_capacity_pct ?? 71.4}%
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748B' }}>Nominal</span>
-            </div>
-            <div className={classes.kpiSubtext}>
-              Across 68 Workshop Lines & Sheds
-            </div>
-            <div className={classes.kpiProgress}>
-              <div className={classes.kpiProgressBar} style={{ width: `${kpis?.overall_capacity_pct ?? 71.4}%`, backgroundColor: '#9333EA' }} />
-            </div>
-          </div>
+              {/* Card 4: Shop Bay Utilization */}
+              <div className={`${classes.kpiCard} ${classes.kpiCardPurple}`}>
+                <div className={classes.kpiHeader}>
+                  <span className={classes.kpiTitle}>Shop Capacity</span>
+                  <FiTool size={14} color="#9333EA" />
+                </div>
+                <div className={classes.kpiValue}>
+                  {kpis?.overall_capacity_pct ?? 0}%
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748B' }}>Nominal</span>
+                </div>
+                <div className={classes.kpiSubtext}>
+                  Across 68 Workshop Lines & Sheds
+                </div>
+                <div className={classes.kpiProgress}>
+                  <div className={classes.kpiProgressBar} style={{ width: `${kpis?.overall_capacity_pct ?? 0}%`, backgroundColor: '#9333EA' }} />
+                </div>
+              </div>
 
-          {/* Card 5: Critical Holds */}
-          <div className={`${classes.kpiCard} ${classes.kpiCardWarning}`}>
-            <div className={classes.kpiHeader}>
-              <span className={classes.kpiTitle}>Critical Holds</span>
-              <FiAlertTriangle size={14} color="#D97706" />
-            </div>
-            <div className={classes.kpiValue}>
-              {kpis?.active_holds_count ?? 1}
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#D97706' }}>Under Control</span>
-            </div>
-            <div className={classes.kpiSubtext}>
-              Leading Cause: Store Material Lead Time
-            </div>
-            <div className={classes.kpiProgress}>
-              <div className={classes.kpiProgressBar} style={{ width: '15%', backgroundColor: '#D97706' }} />
-            </div>
-          </div>
+              {/* Card 5: Critical Holds */}
+              <div className={`${classes.kpiCard} ${classes.kpiCardWarning}`}>
+                <div className={classes.kpiHeader}>
+                  <span className={classes.kpiTitle}>Critical Holds</span>
+                  <FiAlertTriangle size={14} color="#D97706" />
+                </div>
+                <div className={classes.kpiValue}>
+                  {kpis?.active_holds_count ?? 0}
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#D97706' }}>Under Control</span>
+                </div>
+                <div className={classes.kpiSubtext}>
+                  Leading Cause: Store Material Lead Time
+                </div>
+                <div className={classes.kpiProgress}>
+                  <div className={classes.kpiProgressBar} style={{ width: '15%', backgroundColor: '#D97706' }} />
+                </div>
+              </div>
 
-          {/* Card 6: QA First-Time Pass */}
-          <div className={`${classes.kpiCard} ${classes.kpiCardSuccess}`}>
-            <div className={classes.kpiHeader}>
-              <span className={classes.kpiTitle}>QA First-Time Right</span>
-              <FiCheckCircle size={14} color="#059669" />
-            </div>
-            <div className={classes.kpiValue}>
-              {kpis?.qa_first_time_pass_rate ?? 95.9}%
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669' }}>Target ≥ 95%</span>
-            </div>
-            <div className={classes.kpiSubtext}>
-              139 Fit Certificates Issued MTD
-            </div>
-            <div className={classes.kpiProgress}>
-              <div className={classes.kpiProgressBar} style={{ width: '96%', backgroundColor: '#059669' }} />
-            </div>
-          </div>
+              {/* Card 6: QA First-Time Pass */}
+              <div className={`${classes.kpiCard} ${classes.kpiCardSuccess}`}>
+                <div className={classes.kpiHeader}>
+                  <span className={classes.kpiTitle}>QA First-Time Right</span>
+                  <FiCheckCircle size={14} color="#059669" />
+                </div>
+                <div className={classes.kpiValue}>
+                  {kpis?.qa_first_time_pass_rate ?? 0}%
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669' }}>Target ≥ 95%</span>
+                </div>
+                <div className={classes.kpiSubtext}>
+                  139 Fit Certificates Issued MTD
+                </div>
+                <div className={classes.kpiProgress}>
+                  <div className={classes.kpiProgressBar} style={{ width: '96%', backgroundColor: '#059669' }} />
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* 4. Multi-Tab Deep-Dive Navigation */}
